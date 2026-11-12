@@ -15,7 +15,7 @@ import { readFootprints } from './footprints.js';
  *     "tables": { "import": "@ottabase/vault/schema", "names": ["emailSuppressionsTable"] },
  *     "adminPages": [{
  *         "path": "/admin/infrastructure/tower", "title": "Tower", "description": "…", "icon": "Radar",
- *         "group": "infrastructure", "scope": "platform", "page": "admin/infrastructure/TowerPage", "export": "TowerPage"
+ *         "group": "observe", "scope": "platform", "page": "admin/infrastructure/TowerPage", "export": "TowerPage"
  *     }]
  * }
  * ```

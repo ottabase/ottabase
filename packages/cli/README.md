@@ -123,7 +123,8 @@ A package opts in with an `ottabase` field in its package.json:
 
 A package with a user interface can say more, and `otta add` writes that too:
 
-- `adminPages`: entries for the client descriptor (path, title, icon, group, page module, export).
+- `adminPages`: entries for the client descriptor (path, title, icon, group, page module, export). otta-web's groups are
+  `customers`, `observe`, `content`, `growth`, `infrastructure`, `access`, `security` and `appearance`.
 - An `app/` folder mirroring the app layout (`app/ottabase/packages/<key>.ts`, `app/src/pages/…`): copied in where the
   app has no such file yet. A shipped composition wins over the reference app's.
 - `routes`: the package's other SPA pages, written into the client descriptor next to `adminPages`; the app router

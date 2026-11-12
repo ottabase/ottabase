@@ -649,7 +649,7 @@ export default { queue: createQueueHandler(registry) };
 ### @ottabase/alerts
 
 Operator alerts: one `raise()` reaches email, Slack, Discord, Telegram, PagerDuty or a signed webhook, de-duplicated by
-a cooldown, capped per channel, rolled into digests, retried. Channels at Admin → Infrastructure → Alerts.
+a cooldown, capped per channel, rolled into digests, retried. Channels at Admin → Observe → Alerts.
 
 ```typescript
 import { alerts } from '../ottabase/packages/alerts'; // the app's one engine

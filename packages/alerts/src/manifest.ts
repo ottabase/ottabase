@@ -175,7 +175,7 @@ export function createAlertsPackage<Env = unknown>(options: AlertsPackageOptions
                 href: ALERTS_ADMIN_PATH,
                 icon: 'BellRing',
                 scope: 'platform',
-                group: 'infrastructure',
+                group: 'observe',
             },
         ],
 

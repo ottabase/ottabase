@@ -26,9 +26,7 @@ describe('createAlertsPackage', () => {
         expect(pkg.models).toHaveLength(4);
         expect(Object.keys(pkg.cron!)).toEqual([ALERTS_SWEEP_HANDLER, ALERTS_PRUNE_HANDLER]);
         expect(pkg.cron![ALERTS_SWEEP_HANDLER]!.schedule).toBe('*/5 * * * *');
-        expect(pkg.nav).toEqual([
-            expect.objectContaining({ href: '/admin/infrastructure/alerts', group: 'infrastructure' }),
-        ]);
+        expect(pkg.nav).toEqual([expect.objectContaining({ href: '/admin/infrastructure/alerts', group: 'observe' })]);
         expect(pkg.premium).toBeUndefined();
         expect(createPackageRegistry({ packages: [pkg] }).keys()).toEqual(['alerts']);
     });

@@ -23,8 +23,10 @@ import {
     Building2,
     Clock,
     Database,
+    Eye,
     FileText,
     Gem,
+    HeartHandshake,
     Image as ImageIcon,
     Inbox,
     LayoutTemplate, // otta:only ottalanding
@@ -100,7 +102,16 @@ function packagePageNavItem(page: AdminPageContribution & { pkg: string }): Admi
 
 export interface AdminNavGroup {
     /** Stable id used by sidebar for active-group detection (matches URL segment). */
-    id: 'overview' | 'appearance' | 'content' | 'access' | 'security' | 'infrastructure' | 'growth';
+    id:
+        | 'overview'
+        | 'customers'
+        | 'observe'
+        | 'content'
+        | 'growth'
+        | 'infrastructure'
+        | 'access'
+        | 'security'
+        | 'appearance';
     label: string;
     icon: AdminNavIcon;
     items: AdminNavItem[];
@@ -112,27 +123,23 @@ export interface AdminNavGroup {
  */
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     {
-        id: 'appearance',
-        label: 'Appearance',
-        icon: Palette,
+        // Who needs you: filled by packages (billing, support, privacy requests). Empty, it is dropped.
+        id: 'customers',
+        label: 'Customers',
+        icon: HeartHandshake,
+        items: [],
+    },
+    {
+        // Is anything broken: readiness here, alerts and the monitoring packages join it.
+        id: 'observe',
+        label: 'Observe',
+        icon: Eye,
         items: [
             {
-                title: 'Brand Kits',
-                description: 'Theme, layout, typography, and design tokens with real-time preview.',
-                href: '/admin/appearance/brand-kits',
-                icon: Layout,
-            },
-            {
-                title: 'Layouts',
-                description: 'Map routes to layouts (sidebar, topbar, drawer, minimal).',
-                href: '/admin/appearance/layouts',
-                icon: Layers,
-            },
-            {
-                title: 'Menus',
-                description: 'Define navigation menus (sidebar, header, footer, mobile).',
-                href: '/admin/appearance/menus',
-                icon: IconMenu2,
+                title: 'System Readiness',
+                description: 'Every setting, binding and health check this deployment reads, and what is missing.',
+                href: '/admin/infrastructure/readiness',
+                icon: Activity,
             },
         ],
     },
@@ -186,54 +193,43 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         ],
     },
     {
-        id: 'access',
-        label: 'Access',
-        icon: ShieldEllipsis,
+        id: 'growth',
+        label: 'Growth',
+        icon: Rocket,
         items: [
             {
-                title: 'Users',
-                description: 'View and manage all users, assign roles, and control org access.',
-                href: '/admin/access/users',
-                icon: Users,
+                title: 'Analytics',
+                description: 'Page views, shortlink clicks, and referral conversions from Analytics Engine.',
+                href: '/admin/growth/analytics',
+                icon: BarChart3,
             },
+            // otta:begin shortlinks
             {
-                title: 'Organizations',
-                description: 'Manage multi-tenant organizations, members, and settings.',
-                href: '/admin/access/organizations',
-                icon: Building2,
+                title: 'Shortlinks',
+                description: 'Create and manage short URLs with edge click tracking.',
+                href: '/admin/growth/shortlinks',
+                icon: Link2,
+                requiresPackage: 'shortlinks',
+            },
+            // otta:end shortlinks
+            // otta:begin ottaai
+            {
+                title: 'AI providers',
+                description:
+                    'Connect your own AI provider keys, see which key each feature actually resolves to, and diagnose why.',
+                href: '/admin/growth/ai-providers',
+                icon: Sparkles,
                 scope: 'org',
+                requiresPackage: 'ottaai',
             },
+            // otta:end ottaai
             {
-                title: 'Roles & Permissions',
-                description: 'Manage RBAC roles and the permissions matrix.',
-                href: '/admin/access/rbac',
-                icon: UserCog,
-            },
-        ],
-    },
-    {
-        id: 'security',
-        label: 'Security',
-        icon: Shield,
-        items: [
-            {
-                title: 'Audit Logs',
-                description: 'Search audit logs for security and compliance tracking.',
-                href: '/admin/security/audit',
-                icon: FileText,
-                scope: 'org',
-            },
-            {
-                title: 'Row-Level Security',
-                description: 'Inspect tenant isolation policies and verify RLS enforcement.',
-                href: '/admin/security/rls',
-                icon: ShieldCheck,
-            },
-            {
-                title: 'Kill Switches',
-                description: 'Configure global read-only mode or full lockdown.',
-                href: '/admin/security/kill-switches',
-                icon: Power,
+                // Always listed, even with nothing installed: it is the control plane for paid
+                // add-ons, and an operator handed a license key needs somewhere to put it.
+                title: 'Premium packages',
+                description: 'License status for paid add-ons, and where to activate a key.',
+                href: '/admin/growth/premium',
+                icon: Gem,
             },
         ],
     },
@@ -296,65 +292,100 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
                 requiresPackage: 'ottaai',
             },
             // otta:end ottaai
+        ],
+    },
+    {
+        id: 'access',
+        label: 'Access',
+        icon: ShieldEllipsis,
+        items: [
             {
-                title: 'System Readiness',
-                description: 'Every setting, binding and health check this deployment reads, and what is missing.',
-                href: '/admin/infrastructure/readiness',
-                icon: Activity,
+                title: 'Users',
+                description: 'View and manage all users, assign roles, and control org access.',
+                href: '/admin/access/users',
+                icon: Users,
+            },
+            {
+                title: 'Organizations',
+                description: 'Manage multi-tenant organizations, members, and settings.',
+                href: '/admin/access/organizations',
+                icon: Building2,
+                scope: 'org',
+            },
+            {
+                title: 'Roles & Permissions',
+                description: 'Manage RBAC roles and the permissions matrix.',
+                href: '/admin/access/rbac',
+                icon: UserCog,
             },
         ],
     },
     {
-        id: 'growth',
-        label: 'Growth',
-        icon: Rocket,
+        id: 'security',
+        label: 'Security',
+        icon: Shield,
         items: [
             {
-                title: 'Analytics',
-                description: 'Page views, shortlink clicks, and referral conversions from Analytics Engine.',
-                href: '/admin/growth/analytics',
-                icon: BarChart3,
-            },
-            // otta:begin shortlinks
-            {
-                title: 'Shortlinks',
-                description: 'Create and manage short URLs with edge click tracking.',
-                href: '/admin/growth/shortlinks',
-                icon: Link2,
-                requiresPackage: 'shortlinks',
-            },
-            // otta:end shortlinks
-            // otta:begin ottaai
-            {
-                title: 'AI providers',
-                description:
-                    'Connect your own AI provider keys, see which key each feature actually resolves to, and diagnose why.',
-                href: '/admin/growth/ai-providers',
-                icon: Sparkles,
+                title: 'Audit Logs',
+                description: 'Search audit logs for security and compliance tracking.',
+                href: '/admin/security/audit',
+                icon: FileText,
                 scope: 'org',
-                requiresPackage: 'ottaai',
             },
-            // otta:end ottaai
             {
-                // Always listed, even with nothing installed: it is the control plane for paid
-                // add-ons, and an operator handed a license key needs somewhere to put it.
-                title: 'Premium packages',
-                description: 'License status for paid add-ons, and where to activate a key.',
-                href: '/admin/growth/premium',
-                icon: Gem,
+                title: 'Row-Level Security',
+                description: 'Inspect tenant isolation policies and verify RLS enforcement.',
+                href: '/admin/security/rls',
+                icon: ShieldCheck,
+            },
+            {
+                title: 'Kill Switches',
+                description: 'Configure global read-only mode or full lockdown.',
+                href: '/admin/security/kill-switches',
+                icon: Power,
+            },
+        ],
+    },
+    {
+        id: 'appearance',
+        label: 'Appearance',
+        icon: Palette,
+        items: [
+            {
+                title: 'Brand Kits',
+                description: 'Theme, layout, typography, and design tokens with real-time preview.',
+                href: '/admin/appearance/brand-kits',
+                icon: Layout,
+            },
+            {
+                title: 'Layouts',
+                description: 'Map routes to layouts (sidebar, topbar, drawer, minimal).',
+                href: '/admin/appearance/layouts',
+                icon: Layers,
+            },
+            {
+                title: 'Menus',
+                description: 'Define navigation menus (sidebar, header, footer, mobile).',
+                href: '/admin/appearance/menus',
+                icon: IconMenu2,
             },
         ],
     },
 ];
 
 // Package admin pages, each into the group its descriptor names. A group id that does not
-// exist is a typo in a package, and throws here rather than silently dropping the page.
+// exist (a typo, or a package newer than this nav) is reported and the page kept reachable.
 for (const page of PACKAGE_ADMIN_PAGES) {
     const group = ADMIN_NAV_GROUPS.find((candidate) => candidate.id === page.group);
     if (!group) {
-        throw new Error(
-            `[admin-nav] Package "${page.pkg}" places "${page.path}" in unknown nav group "${page.group}".`,
+        // Said loudly, not thrown: this runs when the module loads, and a throw here takes the
+        // whole admin down for one package's descriptor (a typo, or a package newer than this
+        // app's nav). The page stays reachable under Infrastructure until the group is fixed.
+        console.error(
+            `[admin-nav] Package "${page.pkg}" places "${page.path}" in unknown nav group "${page.group}"; listed under Infrastructure.`,
         );
+        ADMIN_NAV_GROUPS.find((candidate) => candidate.id === 'infrastructure')?.items.push(packagePageNavItem(page));
+        continue;
     }
     group.items.push(packagePageNavItem(page));
 }

@@ -69,7 +69,7 @@ export const CLIENT_PACKAGES = [
                 title: 'Alerts',
                 description: 'Where operator alerts go, and every alert with where it went.',
                 icon: BellRing,
-                group: 'infrastructure',
+                group: 'observe',
                 scope: 'platform',
                 load: () => import('@/pages/admin/infrastructure/AlertsPage'),
                 exportName: 'AlertsPage',

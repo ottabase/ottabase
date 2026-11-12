@@ -186,7 +186,10 @@ export const notesClient = definePackageClient({
 });
 ```
 
-`adminPages` join the admin nav. `routes` are the package's other pages: `access` is `protected` (a signed-in page, the
+`adminPages` join the admin nav under their `group`. otta-web's groups, in sidebar order: `customers` (billing, support,
+privacy requests), `observe` (readiness, alerts, monitoring), `content`, `growth`, `infrastructure`, `access`,
+`security`, `appearance`; an empty group is not shown. A group the app's nav does not have is logged and the page is
+listed under Infrastructure. `routes` are the package's other pages: `access` is `protected` (a signed-in page, the
 default) or `public`, and `menu` puts a link in the signed-in account menu. `notices` declares the URL notices the
 package may redirect with (`{ 'checkout-complete': { type: 'success', message: 'Paid.' } }`); `packageNotices(clients)`
 namespaces them as `payport.checkout-complete` for the app's registry, and a server builds the link with

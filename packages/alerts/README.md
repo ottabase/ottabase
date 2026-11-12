@@ -2,8 +2,8 @@
 
 Operator alerts for Ottabase apps. Any package (or your own code) calls `raise()` once; the alert reaches **email,
 Slack, Discord, Telegram, PagerDuty or a signed webhook**, de-duplicated by a cooldown, capped per channel, rolled into
-daily digests where you want them, and retried when a channel is down. The console at **Admin → Infrastructure →
-Alerts** manages the channels and shows every alert with where it went.
+daily digests where you want them, and retried when a channel is down. The console at **Admin → Observe → Alerts**
+manages the channels and shows every alert with where it went.
 
 Alerts are for the people running the app. Mail to your users (receipts, password resets, status-page subscribers) stays
 with `@ottabase/email` and `@ottabase/notifications`.

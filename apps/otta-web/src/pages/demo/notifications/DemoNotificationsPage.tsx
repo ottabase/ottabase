@@ -213,7 +213,7 @@ export function DemoNotificationsPage() {
                                     Alerts for the people running the app (a failing task, an app down, a new support
                                     ticket) go through <code>@ottabase/alerts</code> instead: Slack, Discord, Telegram,
                                     PagerDuty, email or a signed webhook, with cooldowns, digests and retries, managed
-                                    at Admin → Infrastructure → Alerts.
+                                    at Admin → Observe → Alerts.
                                 </p>
                             </div>
 
