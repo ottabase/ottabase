@@ -66,6 +66,9 @@ Without Browser Rendering the routes answer 503 and the health line says so. Wit
 The signature is HMAC-SHA256 of the card's canonical query string under the secret. 400 for a bad card, 503 when
 rendering is not configured, 502 when the browser failed.
 
+The preview is served on the app's own origin and its template may come from an editor (OG Studio), so it answers with
+`content-security-policy: sandbox allow-same-origin`: no script in it runs, while its own fonts and images still load.
+
 ## Your own template
 
 ```ts

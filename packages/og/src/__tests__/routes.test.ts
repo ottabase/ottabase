@@ -112,6 +112,10 @@ describe('another template per request', () => {
             (await ogImageUrl('https://acme.test', { title: 'b' }, 's3cret')).replace('/image?', '/preview?'),
         );
         expect(await preview?.text()).toBe('<p>custom b</p>');
+        // An editor-made template is served on the app's origin: never with script rights.
+        const sandbox = preview?.headers.get('content-security-policy') ?? '';
+        expect(sandbox).toContain('sandbox');
+        expect(sandbox).not.toContain('allow-scripts');
         registerOgTemplateSource(null);
     });
 });

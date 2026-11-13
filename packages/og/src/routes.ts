@@ -97,7 +97,15 @@ export function createOgRouter<Env>(options: OgRouterOptions<Env>): Router<Env> 
         const renderer = options.renderer(c.env);
         if (!renderer) return errorResponse('Browser Rendering is not bound', 503, { code: 'OG_UNAVAILABLE' });
         return new Response(renderer.html(card, await choiceOf(c.env, c.req, card)), {
-            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+            // Sandboxed: the template may come from an editor (OG Studio), and this page is served
+            // on the app's own origin. No script in it ever runs with a visitor's session.
+            headers: {
+                'content-type': 'text/html; charset=utf-8',
+                'cache-control': 'no-store',
+                // No `allow-scripts`, so nothing runs; `allow-same-origin` keeps the page's own
+                // fonts and images loading, so the preview looks like the image that is drawn.
+                'content-security-policy': 'sandbox allow-same-origin',
+            },
         });
     });
 
