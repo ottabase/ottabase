@@ -56,7 +56,8 @@ describe('the built corpus', () => {
         expect(ids('how do I add row level security to a model')[0]).toBe('packages/ottaorm/README.md');
         expect(ids('upload files to R2')).toContain('.claude/skills/ottabase-upload/SKILL.md');
         // A short word stands alone: "pro" is not "provider".
-        expect(['README.md', 'packages/cli/README.md', 'docs/PREMIUM_PACKAGES.md']).toContain(
+        // (A clone that also holds the Pro packages answers with their own README.)
+        expect(['README.md', 'packages/cli/README.md', 'docs/PREMIUM_PACKAGES.md', 'packages/pro/README.md']).toContain(
             ids('what is Ottabase Pro')[0],
         );
 

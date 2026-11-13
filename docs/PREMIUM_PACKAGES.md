@@ -208,10 +208,10 @@ is a free package here, because a cockpit needs every app on the board to carry 
 apps is a private Premium Package.
 
 That private repository is **Ottabase Pro** (`github.com/ottabase/pro`): Tower, PayPort, Blackbox, Beacon, Workbench,
-Helpdesk and Privacy, installed with `git subtree add --prefix=packages/pro …` and `otta add pro`, with no license token
-at all because repository access is the license. It is sold as three yearly licenses split by how many people commit
-(Solo, Team, Company); a lapsed subscription loses repository access and nothing else. See
-[ottabase.com/pro](https://ottabase.com/pro).
+Helpdesk, Privacy, OG Studio, SSO, Campaigns and Lifecycle, installed with `git subtree add --prefix=packages/pro …` and
+`otta add pro`, with no license token at all because repository access is the license. It is sold as three yearly
+licenses split by how many people commit (Solo, Team, Company); a lapsed subscription loses repository access and
+nothing else. See [ottabase.com/pro](https://ottabase.com/pro).
 
 ### Design notes worth copying
 
