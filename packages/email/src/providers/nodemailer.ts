@@ -1,21 +1,10 @@
 import type { TransportOptions } from 'nodemailer';
 import nodemailer from 'nodemailer';
-import type { EmailAddress, Mailer, SendEmailInput, SendEmailResult } from '../types';
+import type { Mailer, SendEmailInput, SendEmailResult } from '../types';
+import { formatAddress, normalizeAddressList } from '../address';
 
 export interface NodemailerMailerOptions {
     server: string | TransportOptions;
-}
-
-function formatAddress(address: EmailAddress) {
-    if (typeof address === 'string') return address;
-    if (address.name) return `${address.name} <${address.email}>`;
-    return address.email;
-}
-
-function normalizeAddressList(address?: EmailAddress | EmailAddress[]): string[] | undefined {
-    if (!address) return undefined;
-    if (Array.isArray(address)) return address.map(formatAddress);
-    return [formatAddress(address)];
 }
 
 export function createNodemailerMailer(options: NodemailerMailerOptions): Mailer {

@@ -54,6 +54,11 @@ registered at load; the app registers its own via `registerAppEmailTemplates()` 
   `Email template not found: <name>`** at runtime — there is no compile-time check. Register the template (add it to the
   app's `APP_TEMPLATES` array) before you reference it, and keep names as shared constants. (Typed template names are a
   roadmap item.)
+- **Pass names as `{ email, name }`, never a hand-built `Name <email>` string.** The providers quote a name that needs
+  it (`formatAddress`, `packages/email/src/address.ts`); an `email` that is not exactly one mailbox fails the send with
+  `{ success: false }`. A plain string is passed through as written.
+- **`tags` are strings; `kind:id` reaches Resend as name `kind`, value `id`**, a bare tag as a flag. Characters outside
+  letters, digits, `_` and `-` become `-`.
 - No `email.defaults` / configured singleton — every send passes a `mailer`.
 - Keep provider secrets in env bindings/secrets; never hardcode, and never read `process.env` (lint-banned in edge
   code).

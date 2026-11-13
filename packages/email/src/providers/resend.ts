@@ -1,4 +1,5 @@
-import type { EmailAddress, Mailer, SendEmailInput } from '../types';
+import type { Mailer, SendEmailInput } from '../types';
+import { formatAddress, normalizeAddressList } from '../address';
 
 export interface ResendMailerOptions {
     apiKey: string;
@@ -7,16 +8,17 @@ export interface ResendMailerOptions {
 
 const DEFAULT_RESEND_BASE_URL = 'https://api.resend.com';
 
-function formatAddress(address: EmailAddress) {
-    if (typeof address === 'string') return address;
-    if (address.name) return `${address.name} <${address.email}>`;
-    return address.email;
-}
-
-function normalizeAddressList(address?: EmailAddress | EmailAddress[]): string[] | undefined {
-    if (!address) return undefined;
-    if (Array.isArray(address)) return address.map(formatAddress);
-    return [formatAddress(address)];
+/**
+ * Resend takes `{ name, value }`, both required and both limited to ASCII letters, digits, `_`
+ * and `-` (anything else is a 422 that fails the send). `kind:id` becomes name and value; a bare
+ * tag is a flag.
+ */
+function resendTag(tag: string): { name: string; value: string } {
+    const clean = (part: string) => part.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 256);
+    const at = tag.indexOf(':');
+    return at > 0
+        ? { name: clean(tag.slice(0, at)), value: clean(tag.slice(at + 1)) || 'true' }
+        : { name: clean(tag) || 'tag', value: 'true' };
 }
 
 function removeUndefined<T extends Record<string, unknown>>(payload: T) {
@@ -50,7 +52,7 @@ export function createResendMailer(options: ResendMailerOptions): Mailer {
                     bcc: normalizeAddressList(input.bcc),
                     reply_to: input.replyTo ? formatAddress(input.replyTo) : undefined,
                     headers: input.headers,
-                    tags: input.tags?.map((tag) => ({ name: tag })),
+                    tags: input.tags?.map(resendTag),
                 });
 
                 const response = await fetch(`${baseUrl}/emails`, {

@@ -9,7 +9,7 @@
 //     await alerts.raise(env, { source: 'app', kind: 'import.failed', title: 'Nightly import failed', severity: 'warning' });
 //
 // Channels (Slack, Discord, Telegram, PagerDuty, email, a signed webhook) are managed at
-// Admin → Infrastructure → Alerts. With none, set ALERTS_EMAIL_TO for mail to a list of
+// Admin → Observe → Alerts. With none, set ALERTS_EMAIL_TO for mail to a list of
 // addresses; with neither, alerts are written to the log.
 //
 // ALERTS_SECRET (optional, falls back to AUTH_SECRET) seals channel targets in D1.
@@ -31,7 +31,16 @@ async function sendMail(env: CloudflareEnv, mail: AlertMail): Promise<void> {
     const { resolveAppMailer } = await import('../../worker/lib/email-provider');
     const { mailer, from, error } = await resolveAppMailer(env);
     if (!mailer) throw new Error(`no mailer configured: ${error ?? 'none'}`);
-    const sent = await mailer.send({ from, to: mail.to, subject: mail.subject, text: mail.text, html: mail.html });
+    const sent = await mailer.send({
+        from,
+        to: mail.to,
+        subject: mail.subject,
+        text: mail.text,
+        html: mail.html,
+        // Machine mail says so: an inbox that turns mail into tickets (or auto-replies) drops it
+        // instead of answering, which would raise the next alert.
+        headers: { 'Auto-Submitted': 'auto-generated' },
+    });
     // The providers report a refusal as { success: false }, not a throw.
     if (!sent.success) throw new Error(sent.error ?? 'the mail provider refused the message');
 }

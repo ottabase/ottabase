@@ -1,4 +1,5 @@
-import type { EmailAddress, Mailer, SendEmailInput } from '../types';
+import type { Mailer, SendEmailInput } from '../types';
+import { formatAddress, normalizeAddressList } from '../address';
 
 export interface SESMailerOptions {
     accessKeyId: string;
@@ -7,18 +8,6 @@ export interface SESMailerOptions {
 }
 
 const DEFAULT_REGION = 'us-east-1';
-
-function formatAddress(address: EmailAddress): string {
-    if (typeof address === 'string') return address;
-    if (address.name) return `${address.name} <${address.email}>`;
-    return address.email;
-}
-
-function normalizeAddressList(address?: EmailAddress | EmailAddress[]): string[] | undefined {
-    if (!address) return undefined;
-    if (Array.isArray(address)) return address.map(formatAddress);
-    return [formatAddress(address)];
-}
 
 /**
  * AWS SES Mailer for Cloudflare Workers

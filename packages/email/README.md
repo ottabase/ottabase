@@ -27,6 +27,17 @@ import { sendTemplatedEmail } from '@ottabase/email/mailer';
 const mailer = createResendMailer({ apiKey: env.EMAIL_RESEND_API_KEY });
 ```
 
+### Addresses and tags
+
+The Resend, SES and SMTP mailers build every address through one `formatAddress`: `{ email, name }` becomes
+`Name <email>`, and a name holding a comma, `<`, `@` or another RFC 5322 special is quoted, so `Acme, Inc.` stays one
+recipient and a name cannot add one. Line breaks and control characters never reach a header. The `email` half must be
+exactly one mailbox: anything else (`a@b.com>, evil@c.com`) fails the send with `{ success: false }` instead of being
+sent. A plain string address is passed through with its line breaks removed.
+
+`tags` are plain strings. Resend needs a name and a value, both limited to letters, digits, `_` and `-`: a tag `kind:id`
+is sent as name `kind`, value `id`; a bare tag as a flag (`value: "true"`); any other character becomes `-`.
+
 ### App-level Templates
 
 Apps can define templates under `src/email/templates` and register them at runtime.

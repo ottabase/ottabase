@@ -213,7 +213,7 @@ describe('Resend Mailer', () => {
             headers: {
                 'X-Custom-Header': 'value',
             },
-            tags: ['tag1', 'tag2'],
+            tags: ['tag1', 'campaign:7f3a-11'],
         });
 
         const call = (global.fetch as any).mock.calls[0];
@@ -222,7 +222,44 @@ describe('Resend Mailer', () => {
         expect(payload.headers).toEqual({
             'X-Custom-Header': 'value',
         });
-        expect(payload.tags).toEqual([{ name: 'tag1' }, { name: 'tag2' }]);
+        // Resend refuses a tag without a value, and any character outside [A-Za-z0-9_-].
+        expect(payload.tags).toEqual([
+            { name: 'tag1', value: 'true' },
+            { name: 'campaign', value: '7f3a-11' },
+        ]);
+    });
+
+    it('quotes a display name an address list would misread', async () => {
+        const mailer = createResendMailer(mockOptions);
+        (global.fetch as any).mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ id: 'x' }),
+        });
+
+        await mailer.send({
+            from: { email: 'hello@acme.test', name: 'Acme, Inc.' },
+            to: [
+                { email: 'jane@example.com', name: 'x <victim@example.com>, y' },
+                { email: 'sam@example.com', name: 'Sam\r\nBcc: other@example.com' },
+                { email: 'plain@example.com', name: 'Plain Name' },
+                { email: 'quoted@example.com', name: '"Acme, Inc."' },
+                { email: 'tab@example.com', name: 'Tab\tName' },
+            ],
+            subject: 'Test',
+            html: '<p>Test</p>',
+        });
+
+        const payload = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+        expect(payload.from).toBe('"Acme, Inc." <hello@acme.test>');
+        expect(payload.to).toEqual([
+            '"x <victim@example.com>, y" <jane@example.com>',
+            '"Sam Bcc: other@example.com" <sam@example.com>',
+            'Plain Name <plain@example.com>',
+            // Already quoted: quoted once, not twice.
+            '"Acme, Inc." <quoted@example.com>',
+            'TabName <tab@example.com>',
+        ]);
     });
 
     it('should remove undefined fields from payload', async () => {
