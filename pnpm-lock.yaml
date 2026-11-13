@@ -306,6 +306,9 @@ importers:
       css-loader:
         specifier: 'catalog:'
         version: 7.1.3(webpack@5.104.1(@swc/core@1.13.5)(esbuild@0.27.2))
+      eslint:
+        specifier: 'catalog:'
+        version: 9.39.2(jiti@2.7.0)
       eslint-plugin-react-hooks:
         specifier: 'catalog:'
         version: 7.0.1(eslint@9.39.2(jiti@2.7.0))
