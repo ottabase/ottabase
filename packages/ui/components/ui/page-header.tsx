@@ -34,7 +34,7 @@ export function PageHeader({ title, eyebrow, description, actions, className, ch
                 {children}
             </div>
             {actions ? (
-                <div data-slot="page-header-actions" className="flex shrink-0 flex-wrap items-center gap-2">
+                <div data-slot="page-header-actions" className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
                     {actions}
                 </div>
             ) : null}
