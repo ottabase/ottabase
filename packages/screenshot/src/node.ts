@@ -120,8 +120,16 @@ export async function openBrowser(chromePath?: string): Promise<{ send: CdpSend;
         close: () => {
             cdp.close();
             proc.kill();
-            // Chrome holds the profile for a moment after exit on Windows.
-            setTimeout(() => rmSync(profileDir, { recursive: true, force: true }), 1000);
+            // Chrome holds the profile for a moment after exit on Windows, sometimes longer: retried,
+            // and never thrown. A throw here is an uncaught exception in a timer, which ends the
+            // process that asked for the shots (and whatever it was keeping alive).
+            setTimeout(() => {
+                try {
+                    rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 });
+                } catch {
+                    // A temp folder left behind; the OS clears it.
+                }
+            }, 1000);
         },
     };
 }

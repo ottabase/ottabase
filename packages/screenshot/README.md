@@ -76,7 +76,9 @@ The Node optimizer is `sharpOptimizer`, and `sharp` is an optional peer dependen
 Pass `optimizer: null` to keep Chrome's bytes, or your own `(bytes, { format, quality }) => Uint8Array`.
 
 For custom flows such as signing in first, compose the parts yourself: `openBrowser()` gives you a CDP `send`, and you
-call `captureShot(send, { origin, shot: normalizeShot(input) })` between your own steps.
+call `captureShot(send, { origin, shot: normalizeShot(input) })` between your own steps. Its `close()` stops Chrome and
+removes the temporary profile a second later, retrying while Windows still holds it; a folder it cannot remove is left
+for the OS, never thrown, so closing cannot end the process that took the shots.
 
 ## From a Worker (the route)
 
