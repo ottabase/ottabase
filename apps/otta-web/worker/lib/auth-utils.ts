@@ -158,6 +158,16 @@ export function getAuthOptions(env: CloudflareEnv): CreateAuthConfigOptions {
         await emitAccountEvent(env, 'user.signed-in', { userId, email, organizationId: organizationId ?? null });
     };
 
+    // An account in use: every page load reads the session, so this is told to the bus at most once
+    // an hour per account (per isolate; a subscriber that counts activity dedupes the rest).
+    options.onSession = async ({ userId, email }) => {
+        const now = Date.now();
+        if (now - (seenAt.get(userId) ?? 0) < SEEN_EVERY_MS) return;
+        if (seenAt.size >= SEEN_TRACKED) seenAt.clear();
+        seenAt.set(userId, now);
+        await emitAccountEvent(env, 'user.seen', { userId, email: email ?? '' });
+    };
+
     // OAuth and magic-link accounts are created (and verified) inside @ottabase/auth, which tells
     // the bus through this. The env is this request's: the one the bus and its subscribers expect.
     options.emit = (_env, name, payload) => emitAccountEvent<keyof AuthEvents>(env, name, payload);
@@ -165,9 +175,15 @@ export function getAuthOptions(env: CloudflareEnv): CreateAuthConfigOptions {
     return options;
 }
 
+/** When each account was last told to the bus as seen, in this isolate. Bounded: cleared when full. */
+const seenAt = new Map<string, number>();
+const SEEN_EVERY_MS = 60 * 60 * 1000;
+const SEEN_TRACKED = 5_000;
+
 /** The account events on the app's bus. `@ottabase/auth` emits the first two through `options.emit`. */
 type AccountEvents = AuthEvents & {
     'user.signed-in': { userId: string; email: string; organizationId: string | null };
+    'user.seen': { userId: string; email: string };
 };
 
 /**

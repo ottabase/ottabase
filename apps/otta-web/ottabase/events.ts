@@ -11,6 +11,8 @@
 // The app's own events, beside what packages emit (`post.published`, `email.inbound`,
 // `email.provider`, `email.unsubscribed`). Delivery is at-least-once: subscribers are idempotent.
 //   `user.signed-in`  { userId, email, organizationId }  every sign-in, after provisioning
+//   `user.seen`       { userId, email }  the account is in use: from the session read every page
+//                     load makes, at most once an hour per account per isolate
 //   `user.created`    { userId, email, name, organizationId, method, at }  once per account:
 //                     credentials sign-up and the bootstrap owner (with their workspace), an
 //                     OAuth or magic-link first sign-in (organizationId null: the workspace

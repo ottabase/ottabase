@@ -147,6 +147,11 @@ const options: CreateAuthConfigOptions = {
 };
 ```
 
+A session lasts weeks, so sign-ins say little about who still uses the app. `onSession({ userId, email })` is called
+when `GET /session` (the request every page load makes) finds a signed-in user. It is awaited, so keep it cheap and
+throttle it; a throw is swallowed and never fails the session read. otta-web uses it to emit
+`user.seen { userId, email }` on its bus at most once an hour per account per isolate.
+
 ## Account events
 
 The handler announces the accounts it creates and verifies through `emit`, which the app wires to its event bus (the

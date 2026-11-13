@@ -286,6 +286,13 @@ async function handleCsrf(env: AuthEnv, request: Request): Promise<Response> {
 
 async function handleGetSession(request: Request, env: AuthEnv, options: CreateAuthConfigOptions): Promise<Response> {
     const session = await getSession(request, env, options);
+    if (session?.user?.id && options.onSession) {
+        try {
+            await options.onSession({ userId: session.user.id, email: session.user.email ?? null });
+        } catch {
+            // The app's bookkeeping; the session read answers either way.
+        }
+    }
     return jsonResponse(session ?? null);
 }
 

@@ -144,6 +144,12 @@ export interface CreateAuthConfigOptions extends CredentialsAuthorizeOptions {
      */
     onSignIn?: (params: { userId: string; email?: string | null }) => Promise<void> | void;
     /**
+     * Called when `GET /session` finds a signed-in user: the one request every page load makes, so
+     * the place to note that an account is in use (sessions last weeks; sign-ins say little). Awaited,
+     * so keep it cheap and throttle it; a throw is swallowed and never fails the session read.
+     */
+    onSession?: (params: { userId: string; email?: string | null }) => Promise<void> | void;
+    /**
      * Announces `user.created` (an OAuth or magic-link account) and `user.verified` (an email
      * verified by OAuth or a magic link). Wire it to the app's event bus (README, "Account
      * events"). Best-effort: a throw is logged and never fails the sign-in.
