@@ -61,6 +61,22 @@ subject, text and HTML bodies, message ids, headers, attachments (as `ArrayBuffe
 for the Worker: unknown mailboxes are rejected at SMTP time, oversize or unparseable mail is rejected with a reason, and
 your `onMessage` receives the parsed message. Parsing is `postal-mime`.
 
+`headers` keeps the first occurrence of each header (lowercased): every server prepends, so the topmost copy is the
+receiving server's and a copy the sender wrote lower down never replaces it. `edgeHeaders` holds only the headers above
+the topmost `Received` line, which only the receiving server can have written (empty when there is no `Received` line).
+Read an authentication verdict from there, never from `headers`:
+
+```typescript
+import { passesDmarc } from '@ottabase/postmaster';
+
+// true only when the receiving server's own verdict (ARC-Authentication-Results, else Authentication-Results)
+// says dmarc=pass with header.from = the From address's domain.
+const trusted = passesDmarc(mail.edgeHeaders, 'mx.cloudflare.net', mail.from?.address);
+```
+
+`mx.cloudflare.net` is Cloudflare Email Routing's authserv-id; behind another inbound server, pass the id its verdict
+header starts with. No verdict, another server's verdict, `dmarc=none`, a softfail or another domain all return `false`.
+
 ## Suppression
 
 ```typescript

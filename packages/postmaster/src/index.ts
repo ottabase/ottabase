@@ -1,3 +1,4 @@
+export { passesDmarc } from './dmarc';
 export {
     createInboundEmailHandler,
     normalizeAddress,

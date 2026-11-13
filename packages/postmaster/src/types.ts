@@ -47,6 +47,13 @@ export interface InboundEmail {
     references: string[];
     date: string | null;
     headers: Record<string, string>;
+    /**
+     * The headers the receiving server wrote: those above the topmost `Received` line (first
+     * occurrence of each, lowercased). Every hop prepends, so nothing the sender wrote can sit
+     * there. Read a verdict such as `arc-authentication-results` from here, never from `headers`.
+     * Empty when the message has no `Received` line.
+     */
+    edgeHeaders: Record<string, string>;
     attachments: InboundAttachment[];
     /** The `+tag` of a plus address, if the recipient had one (`support+abc123@…` → `abc123`). */
     tag: string | null;

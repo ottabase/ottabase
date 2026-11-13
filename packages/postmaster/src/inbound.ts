@@ -61,9 +61,17 @@ export async function parseRawEmail(
 ): Promise<InboundEmail> {
     const parsed = await new PostalMime().parse(raw);
     const headers: Record<string, string> = {};
-    for (const header of parsed.headers ?? []) {
-        headers[header.key.toLowerCase()] = header.value;
-    }
+    // The FIRST occurrence wins. Each server prepends its own headers, so the topmost
+    // `Authentication-Results` is the receiving server's; a copy the sender wrote lower in the
+    // message must never replace it.
+    const edgeHeaders: Record<string, string> = {};
+    const all = parsed.headers ?? [];
+    const firstReceived = all.findIndex((header) => header.key.toLowerCase() === 'received');
+    all.forEach((header, index) => {
+        const key = header.key.toLowerCase();
+        headers[key] ??= header.value;
+        if (index < firstReceived) edgeHeaders[key] ??= header.value;
+    });
     const size = typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength;
     return {
         envelopeFrom: envelope.from.toLowerCase(),
@@ -82,6 +90,7 @@ export async function parseRawEmail(
         references: parsed.references ? parsed.references.split(/\s+/).filter(Boolean) : [],
         date: parsed.date ?? null,
         headers,
+        edgeHeaders,
         attachments: (parsed.attachments ?? []).map((attachment) => ({
             filename: attachment.filename ?? null,
             mimeType: attachment.mimeType,

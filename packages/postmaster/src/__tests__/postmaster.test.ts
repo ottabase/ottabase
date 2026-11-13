@@ -64,6 +64,44 @@ function message(raw: string, to = 'support+t0k3n@acme.test'): InboundMessageLik
 }
 
 describe('inbound', () => {
+    it('keeps the topmost of a repeated header: the receiving server wrote it, the sender the rest', async () => {
+        const raw = [
+            'Authentication-Results: mx.cloudflare.net; dmarc=fail header.from=example.org',
+            'From: Ada <ada@example.org>',
+            'To: support@acme.test',
+            'Subject: Forged',
+            'Authentication-Results: mx.cloudflare.net; dmarc=pass header.from=example.org',
+            '',
+            'Hello',
+        ].join('\r\n');
+        const mail = await parseRawEmail(raw, { from: 'ada@example.org', to: 'support@acme.test' });
+        expect(mail.headers['authentication-results']).toContain('dmarc=fail');
+    });
+
+    it('sets apart what the receiving server wrote: only headers above the topmost Received line', async () => {
+        const raw = [
+            'ARC-Authentication-Results: i=1; mx.cloudflare.net; dmarc=none',
+            'Received: from sender.example by mx.cloudflare.net',
+            'Authentication-Results: mx.cloudflare.net; dmarc=pass',
+            'Received: from laptop by sender.example',
+            'From: Ada <ada@example.org>',
+            'To: support@acme.test',
+            'Subject: Forged',
+            '',
+            'Hello',
+        ].join('\r\n');
+        const mail = await parseRawEmail(raw, { from: 'ada@example.org', to: 'support@acme.test' });
+        expect(Object.keys(mail.edgeHeaders)).toEqual(['arc-authentication-results']);
+        // The sender's own verdict is still readable as a header, but it is not the edge's.
+        expect(mail.headers['authentication-results']).toContain('dmarc=pass');
+        // No Received line at all: nothing can be told apart, so nothing is the edge's.
+        const bare = await parseRawEmail('From: a@b.test\r\nAuthentication-Results: x; dmarc=pass\r\n\r\nHi', {
+            from: 'a@b.test',
+            to: 'support@acme.test',
+        });
+        expect(bare.edgeHeaders).toEqual({});
+    });
+
     it('parses envelope, headers, parts, attachments and the plus tag into plain data', async () => {
         const mail = await parseRawEmail(RAW, { from: 'ada@example.org', to: 'support+t0k3n@acme.test' });
         expect(mail.from).toEqual({ address: 'ada@example.org', name: 'Ada Lovelace' });
