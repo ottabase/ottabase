@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **`user.seen`: the bus hears that an account is in use.** A session lasts weeks, so sign-ins say little about who
+  still uses the app. `@ottabase/auth` gains `onSession` (called when `GET /session` finds a signed-in user, awaited,
+  never able to fail the read), and otta-web uses it to emit `user.seen { userId, email }` at most once an hour per
+  account per isolate. A package that counts activity subscribes; with no subscriber it costs one map lookup.
 - **Building your app on Ottabase: local changes that survive updates.** `docs/BUILDING_ON_OTTABASE.md` is the model for
   an app repo that keeps pulling Ottabase forward: who owns which paths, the order to try when changing behavior
   (config, your own files, extension points, the package last), and how a change to Ottabase's own code is recorded: a
@@ -374,8 +378,78 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - otta-web: `GET /api/admin/health` (platform admin) runs every package's required-env check and health probe;
   `ensurePackageSchedules` seeds a `scheduled_tasks` row for every cron contribution that declares a `schedule`.
 
+### Security (Unreleased)
+
+- **The HTML sanitizers never ran DOMPurify.** `sanitizeInlineHtml`, `sanitizeBlockHtml` and `sanitizeSvgHtml`
+  (`@ottabase/utils/sanitize`) accepted a DOMPurify instance only when it was an object, and a real instance is a
+  function, so every runtime fell through to the regex fallback, which let `<img/src="x"/onerror="…">` through. The
+  check now accepts the instance, so a browser (and Node with jsdom) really sanitizes with DOMPurify; the fallback a
+  Worker uses also strips a handler or a script address that follows a slash or a quote, a closing tag written
+  `</script >`, and what is left of script, style, iframe, object, embed, link, meta, base and form tags, closed or not.
+  `sanitizeHtmlWithoutDom` exposes that pass so it can be tested where a DOM exists.
+- **User HTML could carry a working form.** `sanitizeBlockHtml` kept DOMPurify's html profile whole, forms included, so
+  a post could hold a button that POSTs to the app's own routes with the visitor's cookies (a same-origin request that
+  passes every origin check). Forms, form fields, buttons and the `action`, `formaction` and `form` attributes are now
+  dropped in the browser and in the Worker pass alike.
+- **The Worker's sanitizer pass could run for minutes.** Its script and style patterns were cubic on tags never closed:
+  40 KB of `<script>` took 20 seconds, and anyone who can send mail to an app reaches it. Whole elements are now cut in
+  one forward scan. A cut leaves a space, so `<scr<iframe>ipt>` can no longer join into a script tag; SVG `<animate>`
+  and `<set>` (which can write a `javascript:` link) are dropped. Every start tag is now read the way a browser reads it
+  and written back in one plain form (`<name attr="value">`, handlers and `srcdoc` left out, link values through
+  `sanitizeUrl`, every value re-quoted and escaped), so a stray quote can no longer hide a handler
+  (`<img x' y='>' onerror=…>`) and a link value can no longer break out of its quotes; prose such as "set online=yes" is
+  left alone. The inline mode (`sanitizeInlineHtml` in a Worker) puts a space where it drops a tag and treats a tag name
+  holding `<` as text, so text around a dropped tag can no longer join into a live one (`<img<x> src=x onerror=…>`), and
+  it no longer rescans text full of unclosed `</a ` (92 seconds on 200 KB) or escapes a link's `&amp;` twice. Such a tag
+  name is escaped whole and the scan goes on after it: going on from its next character rescanned the rest from every
+  `<` (`<b<b<b…`, a minute on 200 KB). `sanitizeUrl` reads the scheme before it parses, which is what kept a mail of
+  thousands of links cheap, and refuses a path whose first `/` is followed by `&`, since in an attribute
+  `/&#47;evil.com` decodes to the protocol-relative `//evil.com`.
+- **Page header actions wrap on a phone.** `PageHeader`'s action buttons could not wrap, so two of them pushed a page 35
+  px wider than a 390 px screen.
+- **A display name could add a recipient.** The Resend, SES and SMTP mailers built `Name <email>` without quoting, so a
+  name holding a comma broke the address list and a name such as `x <victim@example.com>, y` added one. One
+  `formatAddress` (`packages/email/src/address.ts`) now quotes a name that needs it and drops line breaks, and throws on
+  an email half that is not one mailbox (`a@b.com>, evil@c.com`).
+- **A forged `Authentication-Results` header could replace the real one.** The inbound mail parser kept the last
+  occurrence of a repeated header; the receiving server writes the first. It keeps the first now, and a parsed mail
+  gains `edgeHeaders`: the headers above the topmost `Received` line, which only the receiving server can have written.
+  Read an authentication verdict from there: `passesDmarc(edgeHeaders, authservId, from)` in `@ottabase/postmaster` does
+  it.
+- **The OG preview page is sandboxed.** `GET /api/og/preview` serves a template on the app's own origin, and a template
+  can come from an editor: it now answers with `content-security-policy: sandbox allow-same-origin` (no script runs; the
+  page's own fonts and images still load).
+- **Log redaction could cost seconds of CPU.** The URL-credentials pattern in `redactErrorForLog` rescanned a long run
+  without whitespace from every word boundary. Its scheme is bounded, the text read is bounded well past what is shown,
+  and a private key whose END marker was cut off is redacted from its BEGIN.
+- **Log redaction missed common credentials.** `redactErrorForLog` now also redacts an `Authorization` value of any
+  scheme, every cookie of a `Cookie` line, names such as `access_token`, `clientSecret` and `aws_secret_access_key`,
+  secrets inside a JSON string (`\"password\":\"…\"`) or after `=>`, a URL password with an empty user or an `@` in it,
+  a value given as a list (quoted or not), every scheme other than Basic and Bearer to the end of its line (Digest, AWS
+  signatures), `key` and `client_secret` in a query string, a secret holding a quote inside a JSON string nested in
+  another, the value of `secret: aws_secret_access_key = …` (the second name, not the first), and tokens recognisable by
+  shape (JWT, AWS key id, Google API key, Stripe, GitHub, Slack, Anthropic, OpenAI, `whsec_`, npm, GitLab, a Telegram
+  bot token in its `/bot` path, a Slack webhook path). Words that only contain a keyword (`design`, `tokenizer`,
+  `sessionStorage`) are left readable, and so is a name followed by no secret: punctuation (`Unexpected token: <`,
+  `password: ***`), one of a few ordinary words (`password: Required`, `secrets: permission denied`) or a count of
+  tokens (`max_tokens: 4096`). A value padded after its separator (an aligned config dump) is still found, and a
+  symbol-only value is still redacted.
+
 ### Changed (Unreleased)
 
+- **A button sizes its icon.** `Button` (`@ottabase/ui`) gives an icon without a size class of its own 16px, as Badge,
+  Tabs and Dropdown already did; a bare Lucide icon used to render at its own 24px. An icon with a `size-*` or `h-*`
+  class keeps it.
+- **The admin sidebar leads with the daily work.** Two new groups, **Customers** (filled by packages: billing, support,
+  privacy requests) and **Observe** (System Readiness, Alerts, and the monitoring packages), ahead of Content, Growth,
+  Infrastructure, Access, Security and Appearance. System Readiness and Alerts moved from Infrastructure; their URLs did
+  not change. A package places a page with `"group": "customers"` or `"observe"` in its descriptor. A page naming a
+  group the nav does not have is reported and listed under Infrastructure; it used to throw as the module loaded and
+  take the whole admin down.
+- **Resend tags carry a value.** Resend refuses a tag without a `value` and any character outside letters, digits, `_`
+  and `-`. A tag `kind:id` is sent as name `kind`, value `id`; a bare tag as a flag (`value: "true"`).
+- **Operator alert mail says it is automatic** (`Auto-Submitted: auto-generated`), so an inbox that turns mail into
+  tickets drops it instead of answering.
 - **The repository moved to `ottabase/ottabase`.** It was `thinkdj/ottabase`. GitHub redirects the old address for the
   web, `git clone`, `git pull` and the API, so existing clones keep working; to point one at the new home, run
   `git remote set-url origin https://github.com/ottabase/ottabase.git`. Package `repository`, `bugs` and `homepage`
