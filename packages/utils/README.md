@@ -159,6 +159,14 @@ import {
 - **`sanitizeCssForStyleTag(css: string): string`** - Neutralize unsafe CSS when injecting into `<style>` tags
 - **`safeImageProps(value, sizes)`** - `<img>` attributes for a content image (`FileSource`): a stored file's renditions
   with `srcSet`/`sizes`/`width`/`height`, or a sanitized outside address as a lone `src`; null otherwise
+- **`sanitizeHtmlWithoutDom(html: string): string`** - The DOM-free pass on its own, exported for tests. App code calls
+  the `sanitize*Html` functions, which pick the parser when there is one
+
+The three `sanitize*Html` functions run DOMPurify wherever a DOM exists (a browser, Node with jsdom). A Worker has no
+DOM, so they fall back to a single-pass, linear-time cleaner: it cuts `<script>` and `<style>` elements with their
+content, drops what is left of script, style, iframe, object, embed, link, meta, base, form and SVG `<animate>`/`<set>`
+tags (closed or not), strips `on*` handlers and rewrites `href`/`src` through `sanitizeUrl` inside tags only (also after
+a slash or a quote, as in `<img/src=x/onerror=…>`), then applies the same tag allowlist.
 
 Use the appropriate sanitizer helper for each untrusted renderer input type:
 
@@ -212,6 +220,17 @@ return errorResponse(error instanceof Error ? error.message : 'Database failure'
 Use `exposure: 'public'` only when the 5xx message is deliberately authored as safe public API copy. Use `metadata` for
 JSON-safe machine-readable context on 4xx responses; `details` remains human-readable text. A typed `ServiceError` may
 carry `internalCause` for the server error boundary to redact and log once; it is never part of `toApiResponse()`.
+
+`redactErrorForLog(error, maxLength = 2000)` turns any thrown value into `{ name, message, stack? }` safe for a log sink
+(lint requires it around `console.error`). It redacts private keys (also one cut off before its END line), URL
+credentials (an empty user or an `@` in the password included), an `Authorization` value of any scheme, every cookie of
+a `Cookie`/`Set-Cookie` line, `Bearer` tokens, named secrets (`password`, `access_token`, `clientSecret`,
+`aws_secret_access_key`...) after `=`, `:` or `=>` and inside a JSON string (even one nested in another), `key` and
+`client_secret` in a query string, and tokens recognisable by shape (JWT, AWS key id, Google API key, Stripe, GitHub,
+Slack, Anthropic, OpenAI, `whsec_`, npm, GitLab, a Telegram bot token in its `/bot` path, a Slack webhook path). Words
+that merely contain a keyword (`design`, `tokenizer`, `sessionStorage`) stay readable, and so does a name followed by no
+secret at all: `Unexpected token: <`, `password: Required`, `secrets: permission denied`. Every pattern is bounded and
+the input is read only a fixed distance past `maxLength`, so a hostile error costs a known amount of CPU.
 
 ### Environment Utilities (`@ottabase/utils/env`) - Server-side
 
