@@ -24,7 +24,9 @@ import { useBrandComponent } from '@ottabase/ui/brand-components';
  *    styles/ui.css (no per-component ring recipe).
  */
 const buttonVariants = cva(
-    'group/button relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold leading-none transition duration-fast ease-theme disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+    // An icon without a size of its own is 16px, as in Badge, Tabs and Dropdown; one that sets
+    // `size-*` or `h-*` keeps it. (The `_` is a space, ` h-`: `lucide-refresh-cw` is not a size.)
+    "group/button relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold leading-none transition duration-fast ease-theme disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-']):not([class^='h-']):not([class*='_h-'])]:size-4",
     {
         variants: {
             variant: {
