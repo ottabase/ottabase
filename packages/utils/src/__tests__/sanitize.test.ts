@@ -4,6 +4,7 @@ import {
     markUgcLinks,
     sanitizeBlockHtml,
     sanitizeCssForStyleTag,
+    sanitizeHtmlWithoutDom,
     sanitizeInlineHtml,
     sanitizeJsonForScript,
     sanitizeSvgHtml,
@@ -58,6 +59,15 @@ describe('sanitizeCssForStyleTag', () => {
 });
 
 describe('sanitizeBlockHtml', () => {
+    it('runs DOMPurify where there is a DOM, not the regex fallback', () => {
+        // Only a real parser closes the tag; the fallback returns the text as it came.
+        expect(sanitizeBlockHtml('<b>bold')).toBe('<b>bold</b>');
+    });
+
+    it('strips a handler on an attribute separated by a slash', () => {
+        expect(sanitizeBlockHtml('<img/src="x"/onerror="alert(1)">')).not.toMatch(/onerror/i);
+    });
+
     it('passes through safe block HTML', () => {
         const input = '<h2>Title</h2><p>Paragraph with <strong>bold</strong></p>';
         const result = sanitizeBlockHtml(input);
@@ -74,6 +84,18 @@ describe('sanitizeBlockHtml', () => {
         const input = '<a href="javascript:alert(1)">click</a>';
         const result = sanitizeBlockHtml(input);
         expect(result).not.toContain('javascript:');
+    });
+
+    it('keeps no form a visitor could submit to the app', () => {
+        // Same-origin, it would carry the visitor's cookies to the app's own routes.
+        const input =
+            '<form method="post" action="/api/sso/start/x"><input type="hidden" name="switch" value="1">' +
+            '<button formaction="/api/x">Continue</button><textarea>t</textarea></form><p>after</p>';
+        for (const out of [sanitizeBlockHtml(input), sanitizeHtmlWithoutDom(input)]) {
+            expect(out).not.toMatch(/<\s*(form|input|button|textarea)\b/i);
+            expect(out).not.toMatch(/formaction|action=/i);
+            expect(out).toContain('<p>after</p>');
+        }
     });
 });
 
@@ -133,9 +155,16 @@ describe('sanitizeUrl', () => {
             '/\t/evil.com',
             '/\n/evil.com',
             ' //evil.com',
+            // Read from an attribute, where the browser decodes entities before it reads the URL.
+            '/&#47;evil.com',
+            '/&#x2f;evil.com',
+            '/&sol;evil.com',
+            '/&bsol;evil.com',
+            '/&Tab;/evil.com',
         ]) {
-            expect(sanitizeUrl(url)).toBe('#');
+            expect(sanitizeUrl(url), url).toBe('#');
         }
+        expect(sanitizeUrl('/docs/a&b')).toBe('/docs/a&b');
     });
 
     it('allows fragment-only links', () => {

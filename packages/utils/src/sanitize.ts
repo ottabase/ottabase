@@ -9,17 +9,30 @@ type ProcessLike = {
 };
 
 const EMPTY_STRING = '';
-const SCRIPT_TAG_PATTERN = /<script[\s\S]*?>[\s\S]*?<\/script>/gi;
-const STYLE_TAG_PATTERN = /<style[\s\S]*?>[\s\S]*?<\/style>/gi;
-const EVENT_HANDLER_ATTR_PATTERN = /\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-const LINK_ATTR_PATTERN = /\s(href|src|xlink:href|formaction)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi;
-const HTML_TAG_PATTERN = /<\/?([a-z][a-z0-9:-]*)(\s[^>]*)?>/gi;
+// What is left once whole `<script>…</script>` and `<style>…</style>` elements are gone: an
+// opening tag never closed (`<script src=…>`), a stray closing one, and the tags that load, run
+// or animate something on their own (SVG `<animate>` / `<set>` can write a `javascript:` href).
+// The `>` is optional: a tag cut off at the end of the text is closed by whatever follows it.
+const ACTIVE_TAG_PATTERN =
+    /<\/?(?:script|style|iframe|object|embed|link|meta|base|form|input|button|textarea|select|frame|frameset|applet|noscript|template|animate|animatemotion|animatetransform|set)\b[^>]*>?/gi;
+// An attribute name the rebuilt tag may carry; anything stranger is dropped with its value.
+const PLAIN_ATTR_NAME = /^[a-z_:][\w:.-]*$/i;
+// A whole document in an attribute: it would need sanitizing of its own.
+const DROPPED_ATTR_NAMES = new Set(['srcdoc']);
+// Where something is cut out, a space goes in: with nothing there, the two sides of the cut can
+// join into a tag (`<scr<iframe>ipt>` would become `<script>`).
+const CUT = ' ';
+// The attribute part stops at the next `<` (a rebuilt value never holds one): without that, text
+// full of `</a ` and no `>` is scanned to its end from every one of them.
+const HTML_TAG_PATTERN = /<\/?([a-z][a-z0-9:-]*)(\s[^<>]*)?>/gi;
+const PLAIN_TAG_NAME = /^[a-z][a-z0-9:-]*$/i;
 const ATTRIBUTE_PATTERN = /([^\s=/>]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
 const JSON_SCRIPT_ESCAPE_PATTERN = /[<>&\u2028\u2029]/g;
 const CSS_DANGEROUS_CONTENT_PATTERN = /<script|<\/style|expression\s*\(|url\((\s*['"]?)\s*javascript:/i;
 const CSS_STYLE_BREAKOUT_PATTERN = /<\/style/gi;
 const CSS_EXPRESSION_PATTERN = /expression\s*\(/gi;
-const CSS_JS_URL_PATTERN = /url\((\s*['"]?)\s*javascript:[^)]*\)/gi;
+// Bounded runs: an open-ended one rescans the rest of the text from each `url(` that never closes.
+const CSS_JS_URL_PATTERN = /url\((\s{0,64}['"]?)\s{0,64}javascript:[^)]{0,2048}\)?/gi;
 const JSON_SCRIPT_ESCAPE_MAP: Record<string, string> = {
     '<': '\\u003c',
     '>': '\\u003e',
@@ -36,8 +49,12 @@ const INLINE_SANITIZE_CONFIG: SanitizeConfig = {
     ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
 };
 
+// No forms in user content: a same-origin form can POST to the app's own routes with the
+// visitor's cookies (login CSRF, a phishing box that looks like the app's own).
 const BLOCK_SANITIZE_CONFIG: SanitizeConfig = {
     USE_PROFILES: { html: true },
+    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'option', 'optgroup', 'datalist', 'fieldset'],
+    FORBID_ATTR: ['formaction', 'action', 'form'],
 };
 
 const SVG_SANITIZE_CONFIG: SanitizeConfig = {
@@ -61,8 +78,15 @@ const domPurifyExport =
         : (rawDomPurifyExport as PurifyFactory);
 let cachedPurify: PurifyLike | null | undefined;
 
+// A DOMPurify instance is a FUNCTION carrying `.sanitize` (the factory returns itself with the
+// methods attached), so an object-only test rejects every real instance and silently leaves the
+// regex fallback as the only sanitizer.
 function isPurifyLike(value: unknown): value is PurifyLike {
-    return Boolean(value && typeof value === 'object' && typeof (value as PurifyLike).sanitize === 'function');
+    return Boolean(
+        value &&
+        (typeof value === 'object' || typeof value === 'function') &&
+        typeof (value as PurifyLike).sanitize === 'function',
+    );
 }
 
 function resolvePurify(): PurifyLike | null {
@@ -120,10 +144,6 @@ function toStringArray(value: unknown): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function escapeHtmlAttribute(value: string): string {
-    return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-}
-
 function sanitizeFallbackOpeningTag(tagName: string, rawAttrs: string, allowedAttrSet: Set<string>): string {
     if (!rawAttrs || allowedAttrSet.size === 0) {
         return `<${tagName}>`;
@@ -147,11 +167,127 @@ function sanitizeFallbackOpeningTag(tagName: string, rawAttrs: string, allowedAt
         }
 
         const safeValue = SAFE_LINK_ATTR_NAMES.has(attrName) ? sanitizeUrl(attrValue) : attrValue;
-        sanitizedAttrs.push(`${attrName}="${escapeHtmlAttribute(safeValue)}"`);
+        // The value was already written back escaped by rebuildStartTags; its entities stay as they are.
+        sanitizedAttrs.push(`${attrName}="${escapeRebuiltValue(safeValue)}"`);
         match = ATTRIBUTE_PATTERN.exec(rawAttrs);
     }
 
     return sanitizedAttrs.length > 0 ? `<${tagName} ${sanitizedAttrs.join(' ')}>` : `<${tagName}>`;
+}
+
+/**
+ * Cut every whole `<tag …>…</tag>` element, content included. One forward scan: each search
+ * starts where the last one ended, so text with thousands of unclosed `<script>` costs one pass
+ * (a lazy `<script[\s\S]*?>[\s\S]*?</script>` pattern rescans the rest from each of them).
+ * An opening tag with no closing one is left for ACTIVE_TAG_PATTERN.
+ */
+function cutElements(input: string, tag: 'script' | 'style'): string {
+    const open = new RegExp(`<${tag}\\b`, 'gi');
+    // A closing tag may carry whitespace before its `>` (`</script >`), and a browser honours it.
+    const close = new RegExp(`</${tag}\\s*>`, 'gi');
+    let out = EMPTY_STRING;
+    let at = 0;
+    for (;;) {
+        open.lastIndex = at;
+        const start = open.exec(input);
+        if (!start) break;
+        close.lastIndex = open.lastIndex;
+        if (!close.exec(input)) break;
+        out += input.slice(at, start.index) + CUT;
+        at = close.lastIndex;
+    }
+    return out + input.slice(at);
+}
+
+const isTagSpace = (char: string | undefined): boolean =>
+    char === ' ' || char === '\n' || char === '\t' || char === '\r' || char === '\f';
+
+/** A value as it goes back between double quotes. `&` stays: the value's own entities are kept. */
+function escapeRebuiltValue(value: string): string {
+    return value.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Read every start tag the way a browser's tokenizer does and write it back in one plain form:
+ * `<name attr="value" …>`. Handlers (`on…`) and `srcdoc` are left out, link attributes go
+ * through `sanitizeUrl`, and every value is re-quoted and escaped.
+ *
+ * Patching a tag in place needs this code and the browser to agree on where each attribute and
+ * the tag itself end, and a stray quote is enough to break that (`<img x' y='>' onerror=…>`).
+ * Written back like this, the browser reads exactly the attributes that were checked. One
+ * forward scan; text outside a start tag is not touched.
+ */
+function rebuildStartTags(input: string): string {
+    const length = input.length;
+    let out = EMPTY_STRING;
+    let at = 0;
+    while (at < length) {
+        const open = input.indexOf('<', at);
+        if (open < 0) break;
+        const first = input.charCodeAt(open + 1) | 0x20;
+        if (!(first >= 97 && first <= 122)) {
+            // Not a start tag (`a < b`, `</p>`, `<!-- -->`).
+            out += input.slice(at, open + 1);
+            at = open + 1;
+            continue;
+        }
+        out += input.slice(at, open);
+        let i = open + 1;
+        while (i < length && !isTagSpace(input[i]) && input[i] !== '/' && input[i] !== '>') i++;
+        const tagName = input.slice(open + 1, i);
+        if (!PLAIN_TAG_NAME.test(tagName)) {
+            // `<img<x>`: one tag named `img<x` to a browser, but cutting the `<x>` out of it later
+            // would leave `<img`. The whole name becomes text, each `<` in it escaped, and the scan
+            // goes on after it: going on from the next character rescans the rest from every `<`.
+            out += `&lt;${tagName.replace(/</g, '&lt;')}`;
+            at = i;
+            continue;
+        }
+        let tag = `<${tagName}`;
+        let selfClosing = false;
+        for (;;) {
+            while (i < length && (isTagSpace(input[i]) || input[i] === '/')) {
+                selfClosing = input[i] === '/';
+                i++;
+            }
+            if (i >= length || input[i] === '>') break;
+            selfClosing = false;
+            const nameStart = i;
+            // A leading `=` belongs to the name, as the tokenizer has it.
+            if (input[i] === '=') i++;
+            while (i < length && !isTagSpace(input[i]) && input[i] !== '/' && input[i] !== '>' && input[i] !== '=') i++;
+            const name = input.slice(nameStart, i).toLowerCase();
+            let value: string | null = null;
+            let next = i;
+            while (next < length && isTagSpace(input[next])) next++;
+            if (input[next] === '=') {
+                next++;
+                while (next < length && isTagSpace(input[next])) next++;
+                const quote = input[next];
+                if (quote === '"' || quote === "'") {
+                    // An unclosed quote runs to the end of the text, for the browser too.
+                    const close = input.indexOf(quote, next + 1);
+                    value = input.slice(next + 1, close < 0 ? length : close);
+                    next = close < 0 ? length : close + 1;
+                } else {
+                    const valueStart = next;
+                    while (next < length && !isTagSpace(input[next]) && input[next] !== '>') next++;
+                    value = input.slice(valueStart, next);
+                }
+                i = next;
+            }
+            if (!PLAIN_ATTR_NAME.test(name) || name.startsWith('on') || DROPPED_ATTR_NAMES.has(name)) continue;
+            if (value === null) {
+                tag += ` ${name}`;
+                continue;
+            }
+            const safe = SAFE_LINK_ATTR_NAMES.has(name) ? sanitizeUrl(value) : value;
+            tag += ` ${name}="${escapeRebuiltValue(safe)}"`;
+        }
+        out += `${tag}${selfClosing ? ' /' : ''}>`;
+        at = Math.min(i + 1, length);
+    }
+    return out + input.slice(at);
 }
 
 function basicFallbackSanitize(input: string, cfg: SanitizeConfig): string {
@@ -159,18 +295,9 @@ function basicFallbackSanitize(input: string, cfg: SanitizeConfig): string {
         return EMPTY_STRING;
     }
 
-    const withoutScripts = input.replace(SCRIPT_TAG_PATTERN, EMPTY_STRING);
-    const withoutStyles = withoutScripts.replace(STYLE_TAG_PATTERN, EMPTY_STRING);
-    const withoutHandlers = withoutStyles.replace(EVENT_HANDLER_ATTR_PATTERN, EMPTY_STRING);
+    const withoutActiveTags = cutElements(cutElements(input, 'script'), 'style').replace(ACTIVE_TAG_PATTERN, CUT);
 
-    // Rewrite link-like attributes through sanitizeUrl to neutralize unsafe schemes.
-    const normalizedLinks = withoutHandlers.replace(
-        LINK_ATTR_PATTERN,
-        (_match, attr, _valueWithQuotes, dQuoted, sQuoted, bare) => {
-            const rawValue = (dQuoted ?? sQuoted ?? bare ?? '').trim();
-            return ` ${String(attr)}="${sanitizeUrl(rawValue)}"`;
-        },
-    );
+    const normalizedLinks = rebuildStartTags(withoutActiveTags);
 
     const allowedTags = toStringArray(cfg.ALLOWED_TAGS).map((tag) => tag.toLowerCase());
     if (allowedTags.length === 0) {
@@ -183,7 +310,8 @@ function basicFallbackSanitize(input: string, cfg: SanitizeConfig): string {
     return normalizedLinks.replace(HTML_TAG_PATTERN, (fullTag, tagName: string, rawAttrs: string | undefined) => {
         const normalizedTagName = tagName.toLowerCase();
         if (!allowedTagSet.has(normalizedTagName)) {
-            return EMPTY_STRING;
+            // A space, not nothing: the text on either side of a dropped tag must not join into one.
+            return CUT;
         }
 
         if (fullTag.startsWith('</')) {
@@ -227,8 +355,10 @@ export function sanitizeUrl(url: string | null | undefined): string {
     if (!trimmed) return '#';
 
     // Block protocol-relative URLs (`//evil.com`). Browsers drop tab/CR/LF inside URLs and read `\` as `/`,
-    // so `/\evil.com` and `/<TAB>/evil.com` are protocol-relative too.
-    if (/^[/\\]{2}/.test(trimmed.replace(/[\t\n\r]/g, ''))) return '#';
+    // so `/\evil.com` and `/<TAB>/evil.com` are protocol-relative too. In an attribute the browser
+    // also decodes entities first, so `/&#47;evil.com` or `/&Tab;/evil.com` is one: a path never
+    // needs `&` straight after its first `/`.
+    if (/^[/\\][/\\&]/.test(trimmed.replace(/[\t\n\r]/g, ''))) return '#';
 
     // Allow relative URLs
     if (
@@ -241,14 +371,19 @@ export function sanitizeUrl(url: string | null | undefined): string {
         return trimmed;
     }
 
-    // Parse protocol — must be in the allowlist
+    // The scheme is read first: most refusals end here, and a `new URL` that throws is slow
+    // enough to matter when one hostile mail carries thousands of links.
+    const scheme = /^([a-z][a-z0-9+.-]{0,31}):/i.exec(trimmed);
+    if (!scheme || !SAFE_URL_SCHEME_SET.has(`${scheme[1]!.toLowerCase()}:`)) return '#';
+
+    // Parse protocol: must be in the allowlist
     try {
         const parsed = new URL(trimmed);
         if (!SAFE_URL_SCHEME_SET.has(parsed.protocol.toLowerCase())) {
             return '#';
         }
     } catch {
-        // Unparseable URL (e.g. bare hostname) — block it
+        // Unparseable URL (e.g. bare hostname): block it
         return '#';
     }
 
@@ -312,7 +447,7 @@ export const UGC_LINK_REL = 'ugc nofollow noopener';
 
 // One `<a ...>` start tag with its attributes; quoted values may hold `>`.
 const ANCHOR_START_TAG = /<a\b((?:\s+[^\s=>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*)\s*\/?>/gi;
-const REL_ATTRIBUTE = /\s+rel\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi;
+const REL_ATTRIBUTE = /\s{1,64}rel\s{0,64}=\s{0,64}(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi;
 
 /**
  * Mark every link of ALREADY SANITIZED HTML as user-generated: any `rel` it had is replaced by
@@ -374,9 +509,17 @@ export function sanitizeCssForStyleTag(css: string): string {
         return css;
     }
 
-    return css
-        .replace(SCRIPT_TAG_PATTERN, EMPTY_STRING)
+    return cutElements(css, 'script')
         .replace(CSS_STYLE_BREAKOUT_PATTERN, '<\\/style')
         .replace(CSS_EXPRESSION_PATTERN, EMPTY_STRING)
         .replace(CSS_JS_URL_PATTERN, 'url($1#)');
+}
+
+/**
+ * The DOM-free pass on its own: what `sanitizeBlockHtml` runs where there is no DOM to parse
+ * with (a Worker). Exported so it can be tested where a DOM exists; app code calls the
+ * `sanitize*Html` functions, which pick the parser when there is one.
+ */
+export function sanitizeHtmlWithoutDom(html: string, mode: 'block' | 'inline' = 'block'): string {
+    return basicFallbackSanitize(html, mode === 'inline' ? INLINE_SANITIZE_CONFIG : {});
 }
