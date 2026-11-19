@@ -13,12 +13,14 @@ import {
     CardHeader,
     CardTitle,
     ConfirmDialog,
+    CopyButton,
+    Indicator,
     Input,
     Textarea,
+    useDebouncedValue,
 } from '@ottabase/ui';
 import {
     IconCheck,
-    IconCopy,
     IconDeviceFloppy,
     IconExternalLink,
     IconLockOpen,
@@ -95,7 +97,8 @@ export function MediaLibraryBrowser({
     const rootRef = useRef<HTMLDivElement>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const [searchValue, setSearchValue] = useState('');
-    const [debouncedSearch, setDebouncedSearch] = useState('');
+    // Settled search text, so we don't fire a request on every keystroke
+    const debouncedSearch = useDebouncedValue(searchValue.trim(), 300);
     const [activeKind, setActiveKind] = useState<MediaKind | 'all'>('all');
     const [selectedId, setSelectedId] = useState<string | null>(null);
     // Multi-select: ordered list of selected IDs (preserves pick order for insertion)
@@ -122,12 +125,6 @@ export function MediaLibraryBrowser({
     const toggleMultiSelect = useCallback((id: string) => {
         setMultiSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     }, []);
-
-    // Debounce search input so we don't fire a request on every keystroke
-    useEffect(() => {
-        const timer = setTimeout(() => setDebouncedSearch(searchValue.trim()), 300);
-        return () => clearTimeout(timer);
-    }, [searchValue]);
 
     // When upload overlay is visible, lock only the nearest local scroll container.
     // Early-return when not uploading so DOM traversal is skipped entirely.
@@ -355,11 +352,6 @@ export function MediaLibraryBrowser({
         },
         [refetchItems],
     );
-
-    const handleCopyUrl = useCallback(async (url: string) => {
-        await navigator.clipboard.writeText(url);
-        toast.success('Media URL copied');
-    }, []);
 
     const handleDelete = useCallback(async () => {
         if (!deleteTarget) {
@@ -687,38 +679,42 @@ export function MediaLibraryBrowser({
                         {allowMultiselect && mode === 'picker' && multiSelectedIds.length > 1 ? (
                             <>
                                 {/* Fan of up to 5 thumbnails */}
-                                <div className="relative flex items-center justify-center" style={{ height: '160px' }}>
-                                    {stackCards.map((item, i) => {
-                                        const mid = (stackCards.length - 1) / 2;
-                                        const offset = i - mid;
-                                        // Spread cards in a fan: outermost cards are most rotated & offset
-                                        const rotate = offset * 9;
-                                        const translateX = offset * 22;
-                                        return (
-                                            <div
-                                                key={item.id}
-                                                className="absolute overflow-hidden rounded-xl border-2 border-background bg-muted/30 shadow-md"
-                                                style={{
-                                                    width: '100px',
-                                                    height: '130px',
-                                                    transform: `rotate(${rotate}deg) translateX(${translateX}px)`,
-                                                    zIndex: i + 1,
-                                                }}
-                                            >
-                                                <MediaPreview
-                                                    item={item}
-                                                    className="h-full w-full rounded-none border-0"
-                                                    fit="cover"
-                                                />
-                                            </div>
-                                        );
-                                    })}
-                                    {/* +N badge when selection exceeds the 5-card stack */}
-                                    {multiSelectedIds.length > 5 && (
-                                        <div className="absolute bottom-0 right-6 z-10 flex h-6 min-w-6 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-bold text-primary-foreground shadow">
-                                            +{multiSelectedIds.length - 5}
-                                        </div>
-                                    )}
+                                {/* +N on the fan's corner when the selection exceeds the 5-card stack */}
+                                <div className="flex justify-center">
+                                    <Indicator
+                                        label={`+${multiSelectedIds.length - 5}`}
+                                        indicatorLabel={`${multiSelectedIds.length - 5} more selected`}
+                                        disabled={multiSelectedIds.length <= 5}
+                                        position="bottom-end"
+                                        offset={12}
+                                        className="h-[160px] w-[200px] items-center justify-center"
+                                    >
+                                        {stackCards.map((item, i) => {
+                                            const mid = (stackCards.length - 1) / 2;
+                                            const offset = i - mid;
+                                            // Spread cards in a fan: outermost cards are most rotated & offset
+                                            const rotate = offset * 9;
+                                            const translateX = offset * 22;
+                                            return (
+                                                <div
+                                                    key={item.id}
+                                                    className="absolute overflow-hidden rounded-xl border-2 border-background bg-muted/30 shadow-md"
+                                                    style={{
+                                                        width: '100px',
+                                                        height: '130px',
+                                                        transform: `rotate(${rotate}deg) translateX(${translateX}px)`,
+                                                        zIndex: i + 1,
+                                                    }}
+                                                >
+                                                    <MediaPreview
+                                                        item={item}
+                                                        className="h-full w-full rounded-none border-0"
+                                                        fit="cover"
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </Indicator>
                                 </div>
 
                                 {/* Selection summary metadata */}
@@ -900,15 +896,16 @@ export function MediaLibraryBrowser({
 
                                     {mode === 'page' && (
                                         <>
-                                            <Button
-                                                type="button"
+                                            <CopyButton
+                                                value={selectedItem.url}
+                                                label="media URL"
+                                                notify
                                                 variant="outline"
+                                                size="default"
                                                 className="w-full"
-                                                onClick={() => handleCopyUrl(selectedItem.url)}
                                             >
-                                                <IconCopy className="mr-2 h-4 w-4" />
                                                 Copy URL
-                                            </Button>
+                                            </CopyButton>
 
                                             {canModerate &&
                                                 (selectedItem.status === 'quarantined' ? (

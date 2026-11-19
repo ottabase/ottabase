@@ -70,11 +70,14 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
+    DiffView,
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuTrigger,
     Input,
+    NumberInput,
+    PasswordInput,
     Label,
     NativeSelect,
     NativeSelectOption,
@@ -89,6 +92,7 @@ import {
 } from '@ottabase/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+// Word-level diff for the version compare (Myers, fast on long posts); DiffView renders its parts as they are
 import * as Diff from 'diff';
 import {
     ArrowLeft,
@@ -999,16 +1003,10 @@ function BlogEditorForm({ postId, isEditMode, initialData, defaultContentType }:
         }
     };
 
-    // Update hero image max height (100–3000 px)
-    const handleHeroMaxHeightChange = (value: string) => {
+    // Update hero image max height (the NumberInput keeps it within 100–3000 px)
+    const handleHeroMaxHeightChange = (maxHeight: number | null) => {
         if (heroImage) {
-            if (!value) {
-                setHeroImage({ ...heroImage, maxHeight: undefined });
-                return;
-            }
-            const parsed = Number(value);
-            const maxHeight = Number.isFinite(parsed) ? Math.min(3000, Math.max(100, parsed)) : undefined;
-            setHeroImage({ ...heroImage, maxHeight });
+            setHeroImage({ ...heroImage, maxHeight: maxHeight ?? undefined });
         }
     };
 
@@ -1911,12 +1909,13 @@ function BlogEditorForm({ postId, isEditMode, initialData, defaultContentType }:
 
                             <div className="space-y-2">
                                 <Label>Max Height (px)</Label>
-                                <Input
-                                    type="number"
+                                <NumberInput
                                     min={100}
                                     max={3000}
-                                    value={heroImage?.maxHeight ?? ''}
-                                    onChange={(e) => handleHeroMaxHeightChange(e.target.value)}
+                                    decimalScale={0}
+                                    suffix="px"
+                                    value={heroImage?.maxHeight ?? null}
+                                    onChange={handleHeroMaxHeightChange}
                                     placeholder="Default (natural height)"
                                     disabled={!heroImage}
                                 />
@@ -2109,9 +2108,9 @@ function BlogEditorForm({ postId, isEditMode, initialData, defaultContentType }:
                                     <>
                                         <div className="space-y-2">
                                             <Label htmlFor="postPassword">Password</Label>
-                                            <Input
+                                            <PasswordInput
                                                 id="postPassword"
-                                                type="password"
+                                                autoComplete="new-password"
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
                                                 placeholder={
@@ -2174,13 +2173,11 @@ function BlogEditorForm({ postId, isEditMode, initialData, defaultContentType }:
                             {seriesId && (
                                 <div className="space-y-2">
                                     <Label>Order in Series</Label>
-                                    <Input
-                                        type="number"
+                                    <NumberInput
                                         min={1}
-                                        value={seriesOrder || ''}
-                                        onChange={(e) =>
-                                            setSeriesOrder(e.target.value ? parseInt(e.target.value, 10) : null)
-                                        }
+                                        decimalScale={0}
+                                        value={seriesOrder}
+                                        onChange={setSeriesOrder}
                                         placeholder="1, 2, 3..."
                                     />
                                     <p className="text-xs text-muted-foreground">
@@ -2592,45 +2589,21 @@ function BlogEditorForm({ postId, isEditMode, initialData, defaultContentType }:
                         <div className="space-y-8 mt-4">
                             <div>
                                 <h3 className="mb-2 text-[0.9375rem] font-semibold">Title Changes</h3>
-                                <div className="rounded-lg bg-muted/40 p-4 text-lg">
-                                    {compareDiffs.titleDiff.map((part, index) => {
-                                        const color = part.added
-                                            ? 'text-success bg-success/10'
-                                            : part.removed
-                                              ? 'text-destructive bg-destructive/10 line-through'
-                                              : 'text-foreground';
-                                        return (
-                                            <span key={index} className={`px-0.5 rounded ${color}`}>
-                                                {part.value}
-                                            </span>
-                                        );
-                                    })}
-                                </div>
+                                <DiffView
+                                    parts={compareDiffs.titleDiff}
+                                    className="rounded-lg bg-muted/40 p-4 text-lg"
+                                />
                             </div>
 
                             <div>
                                 <h3 className="mb-2 text-[0.9375rem] font-semibold">
                                     Content Changes (Text Extraction)
                                 </h3>
-                                <div className="whitespace-pre-wrap rounded-lg bg-muted/40 p-4 font-mono text-sm">
-                                    {compareDiffs.contentDiff.map((part, index) => {
-                                        const color = part.added
-                                            ? 'text-success bg-success/10'
-                                            : part.removed
-                                              ? 'text-destructive bg-destructive/10 line-through'
-                                              : 'text-foreground';
-                                        return (
-                                            <span key={index} className={`px-0.5 rounded ${color}`}>
-                                                {part.value}
-                                            </span>
-                                        );
-                                    })}
-                                    {compareDiffs.contentDiff.length === 0 && (
-                                        <p className="text-muted-foreground italic">
-                                            No text content changes detected.
-                                        </p>
-                                    )}
-                                </div>
+                                <DiffView
+                                    parts={compareDiffs.contentDiff}
+                                    emptyMessage="No text content changes detected."
+                                    className="rounded-lg bg-muted/40 p-4 font-mono text-sm"
+                                />
                             </div>
                         </div>
                     )}

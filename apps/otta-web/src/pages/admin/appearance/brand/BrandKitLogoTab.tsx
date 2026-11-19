@@ -1,5 +1,5 @@
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ottabase/ui';
-import { IconAlertTriangle, IconLoader2, IconPhotoUp, IconTrash } from '@tabler/icons-react';
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, LoadingOverlay } from '@ottabase/ui';
+import { IconAlertTriangle, IconPhotoUp, IconTrash } from '@tabler/icons-react';
 import { useCallback, useState, type CSSProperties } from 'react';
 import { toast } from 'sonner';
 import { brandKitApi } from './brandApi';
@@ -202,6 +202,7 @@ export function BrandKitLogoTab({ kitId, logos, logoBaseUrl = '', onChanged }: B
                                 <button
                                     type="button"
                                     disabled={!!busy}
+                                    aria-busy={isBusy || undefined}
                                     onClick={() => document.getElementById(`logo-${logoType}`)?.click()}
                                     onDrop={(e) => {
                                         e.preventDefault();
@@ -242,12 +243,10 @@ export function BrandKitLogoTab({ kitId, logos, logoBaseUrl = '', onChanged }: B
                                                 : 'Drop image or click to browse'}
                                         </span>
                                     )}
-                                    {isBusy && (
-                                        <span className="absolute inset-0 flex items-center justify-center gap-2 bg-background/70 text-xs font-medium backdrop-blur-[1px]">
-                                            <IconLoader2 className="h-4 w-4 animate-spin" />
-                                            {uploading === logoType ? 'Uploading…' : 'Removing…'}
-                                        </span>
-                                    )}
+                                    <LoadingOverlay
+                                        visible={isBusy}
+                                        label={uploading === logoType ? 'Uploading…' : 'Removing…'}
+                                    />
                                 </button>
                                 <div className="flex min-h-7 items-center justify-between gap-2">
                                     <span className="text-[11px] text-muted-foreground">{spec.spec}</span>

@@ -15,11 +15,17 @@
 
 import {
     Button,
+    DataList,
+    DataListItem,
+    DataListLabel,
+    DataListValue,
     Input,
     Label,
     LiveDot,
     NativeSelect,
     NativeSelectOption,
+    NumberInput,
+    ShowMore,
     Stat,
     StatusChip,
     Switch,
@@ -127,8 +133,8 @@ interface Draft {
     minSeverity: Severity;
     sources: string;
     mode: ChannelMode;
-    digestHour: string;
-    maxPerHour: string;
+    digestHour: number | null;
+    maxPerHour: number | null;
     to: string;
     url: string;
     botToken: string;
@@ -144,8 +150,8 @@ const blank = (type: ChannelType = 'slack'): Draft => ({
     minSeverity: type === 'pagerduty' ? 'critical' : 'info',
     sources: '',
     mode: 'immediate',
-    digestHour: '8',
-    maxPerHour: '30',
+    digestHour: 8,
+    maxPerHour: 30,
     to: '',
     url: '',
     botToken: '',
@@ -161,8 +167,8 @@ const draftOf = (channel: ChannelView): Draft => ({
     minSeverity: channel.minSeverity,
     sources: (channel.sources ?? []).join(', '),
     mode: channel.mode,
-    digestHour: String(channel.digestHour),
-    maxPerHour: String(channel.maxPerHour),
+    digestHour: channel.digestHour,
+    maxPerHour: channel.maxPerHour,
     to: (channel.config.to ?? []).join(', '),
     chatId: channel.config.chatId ?? '',
 });
@@ -175,8 +181,8 @@ function inputOf(draft: Draft, editing: boolean): ChannelInput {
         minSeverity: draft.minSeverity,
         sources: draft.sources.trim() ? draft.sources.split(',') : null,
         mode: draft.mode,
-        digestHour: Number(draft.digestHour),
-        maxPerHour: Number(draft.maxPerHour),
+        digestHour: draft.digestHour ?? 0,
+        maxPerHour: draft.maxPerHour ?? 0,
         ...(editing ? {} : { type: draft.type }),
     };
     switch (draft.type) {
@@ -393,25 +399,25 @@ function ChannelForm({
                 {draft.mode === 'digest' && batches ? (
                     <div className={fieldClass}>
                         <Label htmlFor="alert-channel-hour">Digest hour (UTC)</Label>
-                        <Input
+                        <NumberInput
                             id="alert-channel-hour"
-                            type="number"
                             min={0}
                             max={23}
+                            decimalScale={0}
                             value={draft.digestHour}
-                            onChange={(event) => set('digestHour', event.target.value)}
+                            onChange={(value) => set('digestHour', value)}
                         />
                     </div>
                 ) : batches ? (
                     <div className={fieldClass}>
                         <Label htmlFor="alert-channel-cap">At most per hour</Label>
-                        <Input
+                        <NumberInput
                             id="alert-channel-cap"
-                            type="number"
                             min={1}
                             max={1000}
+                            decimalScale={0}
                             value={draft.maxPerHour}
-                            onChange={(event) => set('maxPerHour', event.target.value)}
+                            onChange={(value) => set('maxPerHour', value)}
                         />
                     </div>
                 ) : null}
@@ -679,19 +685,21 @@ function AlertRow({ alert }: { alert: AlertView }) {
             </summary>
             <div className="mt-3 space-y-3">
                 {alert.body ? (
-                    <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs">
-                        {alert.body}
-                    </pre>
+                    <ShowMore maxHeight={160}>
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs">
+                            {alert.body}
+                        </pre>
+                    </ShowMore>
                 ) : null}
                 {alert.fields.length ? (
-                    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                    <DataList size="sm" className="gap-y-1">
                         {alert.fields.map((field) => (
-                            <div key={field.label} className="contents">
-                                <dt className="text-muted-foreground">{field.label}</dt>
-                                <dd className="break-all font-mono">{field.value}</dd>
-                            </div>
+                            <DataListItem key={field.label}>
+                                <DataListLabel>{field.label}</DataListLabel>
+                                <DataListValue className="break-all font-mono">{field.value}</DataListValue>
+                            </DataListItem>
                         ))}
-                    </dl>
+                    </DataList>
                 ) : null}
                 {alert.url ? (
                     <a href={alert.url} className="inline-flex items-center gap-1 text-xs underline underline-offset-2">

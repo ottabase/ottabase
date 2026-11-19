@@ -5,9 +5,10 @@
 // Uses semantic HTML + theme CSS variables for consistent styling
 // ============================================================
 
+import { LoadingOverlay } from '@ottabase/ui';
 import { flexRender } from '@tanstack/react-table';
 import { clsx } from 'clsx';
-import { Inbox, Loader2 } from 'lucide-react';
+import { Inbox } from 'lucide-react';
 import type { DataTableProps } from '../types';
 import { DataTableColumnHeader } from './DataTableColumnHeader';
 import { DataTablePagination } from './DataTablePagination';
@@ -100,20 +101,16 @@ export function DataTable<TData extends Record<string, unknown>>({
             )}
 
             {/* Table container */}
-            <div className={clsx('relative overflow-hidden rounded-xl border border-border/60')}>
+            <div
+                className={clsx('relative overflow-hidden rounded-xl border border-border/60')}
+                aria-busy={isFetching || isLoading || undefined}
+            >
                 {/* Refetch overlay: stale rows stay visible, blurred, under a spinner */}
-                {isFetching && !isLoading && rows.length > 0 && (
-                    <div
-                        className="absolute inset-0 z-20 flex items-center justify-center bg-background/40 backdrop-blur-[1px]"
-                        role="status"
-                        aria-live="polite"
-                    >
-                        <span className="inline-flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                            Loading…
-                        </span>
-                    </div>
-                )}
+                <LoadingOverlay
+                    visible={isFetching && !isLoading && rows.length > 0}
+                    label="Loading…"
+                    className="bg-background/40"
+                />
                 <div
                     className="overflow-x-auto"
                     style={

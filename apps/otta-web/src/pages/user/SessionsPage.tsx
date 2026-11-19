@@ -6,11 +6,24 @@
 import { useSession } from '@/lib/auth';
 import type { SessionSummary } from '@ottabase/auth/backend';
 import { useApiMutation, useApiQuery } from '@ottabase/ottaorm/client';
-import { Badge, Button, Card, CardContent, CardHeader, ConfirmDialog, PageHeader, toast } from '@ottabase/ui';
+import {
+    Badge,
+    Button,
+    Card,
+    CardContent,
+    CardHeader,
+    ConfirmDialog,
+    DataList,
+    DataListItem,
+    DataListLabel,
+    DataListValue,
+    PageHeader,
+    toast,
+} from '@ottabase/ui';
 import { formatDateForUser } from '@ottabase/utils/timezone';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { CheckCircle2, Clock, LogOut, MapPin, MonitorSmartphone, Pencil } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Clock, LogOut, MapPin, MonitorSmartphone, Pencil } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 const SESSIONS_KEY = ['me', 'sessions'];
@@ -206,28 +219,41 @@ export function SessionsPage() {
                                 )}
                             </CardHeader>
                             <CardContent className="space-y-3">
-                                <dl className="space-y-1.5 text-sm">
-                                    <div className="flex items-center gap-2 text-muted-foreground">
-                                        <MonitorSmartphone className="h-3.5 w-3.5 shrink-0" />
-                                        <dd className="truncate text-foreground">
+                                {/* Icons are the visible labels; each carries its name for screen readers */}
+                                <DataList className="gap-x-2">
+                                    <DataListItem className="items-center">
+                                        <DataListLabel className="flex">
+                                            <MonitorSmartphone aria-hidden="true" />
+                                            <span className="sr-only">Device</span>
+                                        </DataListLabel>
+                                        <DataListValue className="truncate">
                                             {session.device ?? 'Unknown device'}
-                                        </dd>
-                                    </div>
+                                        </DataListValue>
+                                    </DataListItem>
                                     {(session.geo || session.ip) && (
-                                        <div className="flex items-center gap-2 text-muted-foreground">
-                                            <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                            <dd className="truncate">
+                                        <DataListItem className="items-center">
+                                            <DataListLabel className="flex">
+                                                <MapPin aria-hidden="true" />
+                                                <span className="sr-only">Location</span>
+                                            </DataListLabel>
+                                            <DataListValue className="truncate text-muted-foreground">
                                                 {[session.geo, session.ip].filter(Boolean).join(' · ')}
-                                            </dd>
-                                        </div>
+                                            </DataListValue>
+                                        </DataListItem>
                                     )}
-                                    <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                                        <dd title={new Date(session.createdAt).toISOString()}>
-                                            Signed in {formatDateForUser(session.createdAt, 'date') || '—'}
-                                        </dd>
-                                        <dd className="text-success">{expiresIn(session.expiresAt)}</dd>
-                                    </div>
-                                </dl>
+                                    <DataListItem className="items-center">
+                                        <DataListLabel className="flex">
+                                            <CalendarClock aria-hidden="true" />
+                                            <span className="sr-only">Signed in</span>
+                                        </DataListLabel>
+                                        <DataListValue className="flex items-center justify-between gap-2 text-muted-foreground">
+                                            <span title={new Date(session.createdAt).toISOString()}>
+                                                Signed in {formatDateForUser(session.createdAt, 'date') || '—'}
+                                            </span>
+                                            <span className="text-success">{expiresIn(session.expiresAt)}</span>
+                                        </DataListValue>
+                                    </DataListItem>
+                                </DataList>
                                 {session.current ? (
                                     <Button
                                         variant="destructive"
