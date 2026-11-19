@@ -189,7 +189,7 @@ export {
 
 export { Skeleton } from './skeleton';
 
-export { Slider } from './slider';
+export { Slider, type SliderProps } from './slider';
 
 export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption } from './table';
 

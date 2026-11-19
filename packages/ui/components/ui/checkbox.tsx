@@ -2,13 +2,15 @@
 
 import * as React from 'react';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
-import { Check } from 'lucide-react';
+import { Check, Minus } from 'lucide-react';
 
 import { cn } from '@ottabase/ui/lib/utils';
 
 /*
  * Theming hooks (BrandEngine): data-slot stamps for theme CSS; focus-visible
  * styling comes from the GLOBAL --focus-ring-* rule in styles/ui.css.
+ * `checked="indeterminate"` shows a dash: both icons render, the Indicator's
+ * data-state picks one (so it also flips correctly when uncontrolled).
  */
 const Checkbox = React.forwardRef<
     React.ElementRef<typeof CheckboxPrimitive.Root>,
@@ -25,9 +27,16 @@ const Checkbox = React.forwardRef<
     >
         <CheckboxPrimitive.Indicator
             data-slot="checkbox-indicator"
-            className={cn('flex items-center justify-center text-current')}
+            className={cn('group/checkbox-indicator flex items-center justify-center text-current')}
         >
-            <Check className="size-3.5 [stroke-width:2.5]" />
+            <Check
+                data-slot="checkbox-check"
+                className="size-3.5 [stroke-width:2.5] group-data-[state=indeterminate]/checkbox-indicator:hidden"
+            />
+            <Minus
+                data-slot="checkbox-dash"
+                className="hidden size-3.5 [stroke-width:2.5] group-data-[state=indeterminate]/checkbox-indicator:block"
+            />
         </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
 ));
