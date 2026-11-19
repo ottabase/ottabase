@@ -1,6 +1,7 @@
+import { TableOfContents as UiTableOfContents, useClipboard, type TableOfContentsItem } from '@ottabase/ui';
 import { CodeBlock } from '@ottabase/ui-code-highlight';
 import { sanitizeBlockHtml } from '@ottabase/utils/sanitize';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import type { DocsCodeRenderMode, TocItem } from '../types';
 import { extractToc } from '../utils';
 
@@ -131,30 +132,13 @@ function CodeBlockRenderer({
 
 /** Simple code block: copy button + lang label, no syntax highlighting */
 function SimpleCodeBlock({ lang, code }: { lang: string; code: string }) {
-    const [copied, setCopied] = useState(false);
-    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const handleCopy = useCallback(async () => {
-        try {
-            await navigator.clipboard.writeText(code);
-            setCopied(true);
-            timerRef.current = setTimeout(() => setCopied(false), 2000);
-        } catch {
-            /* clipboard not available */
-        }
-    }, [code]);
-
-    useEffect(() => {
-        return () => {
-            if (timerRef.current) clearTimeout(timerRef.current);
-        };
-    }, []);
+    const { copy, copied } = useClipboard({ timeout: 2000 });
 
     return (
         <div className="otta-docs-code-block otta-docs-code-enhanced">
             <div className="otta-docs-code-header">
                 {lang && lang !== 'text' && <span className="otta-docs-code-lang-label">{lang}</span>}
-                <button type="button" className="otta-docs-code-copy" onClick={handleCopy} title="Copy code">
+                <button type="button" className="otta-docs-code-copy" onClick={() => void copy(code)} title="Copy code">
                     {copied ? (
                         <svg
                             width="14"
@@ -197,48 +181,43 @@ function SimpleCodeBlock({ lang, code }: { lang: string; code: string }) {
 
 interface TableOfContentsProps {
     content: string;
+    /** The active heading id. Leave undefined and the list follows the scroll over the rendered headings. */
     activeId?: string;
+    /** Called after a click scrolled to the heading. */
     onItemClick?: (id: string) => void;
     className?: string;
 }
 
+/** The headings the scroll spy watches: the ones extractToc lists, inside the rendered markdown. */
+const DOCS_HEADING_SELECTOR = '.otta-docs-content h2, .otta-docs-content h3, .otta-docs-content h4';
+
+/**
+ * "On this page" for a markdown document: @ottabase/ui's TableOfContents, unstyled and dressed by the docs
+ * stylesheet (`.otta-docs-toc [data-slot=…]`).
+ */
 export const TableOfContents = memo(function TableOfContents({
     content,
     activeId,
     onItemClick,
     className = '',
 }: TableOfContentsProps) {
-    const toc = useMemo<TocItem[]>(() => extractToc(content), [content]);
-
-    if (toc.length === 0) return null;
+    const items = useMemo<TableOfContentsItem[]>(
+        () => extractToc(content).map((item: TocItem) => ({ id: item.id, label: item.text, depth: item.level })),
+        [content],
+    );
 
     return (
-        <nav className={`otta-docs-toc ${className}`}>
-            <p className="otta-docs-toc-title">On this page</p>
-            <ul className="otta-docs-toc-list">
-                {toc.map((item, index) => (
-                    <li key={`${item.id}-${index}`} className="otta-docs-toc-item" data-level={item.level}>
-                        {/* Use button to prevent router from intercepting #anchor clicks */}
-                        <button
-                            type="button"
-                            className={`otta-docs-toc-link ${activeId === item.id ? 'otta-docs-toc-active' : ''}`}
-                            style={{ paddingLeft: `${(item.level - 2) * 12 + 12}px` }}
-                            onClick={() => {
-                                if (onItemClick) {
-                                    onItemClick(item.id);
-                                } else {
-                                    document
-                                        .getElementById(item.id)
-                                        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                            }}
-                        >
-                            {item.text}
-                        </button>
-                    </li>
-                ))}
-            </ul>
-        </nav>
+        <UiTableOfContents
+            unstyled
+            items={items}
+            activeId={activeId}
+            selector={DOCS_HEADING_SELECTOR}
+            rescanKey={content}
+            onItemClick={onItemClick}
+            title="On this page"
+            aria-label="On this page"
+            className={`otta-docs-toc ${className}`.trim()}
+        />
     );
 });
 

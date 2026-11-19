@@ -257,7 +257,7 @@
     margin-top: 24px;
 }
 
-.otta-docs-toc-title {
+.otta-docs-toc [data-slot='toc-title'] {
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -267,18 +267,20 @@
     margin: 0;
 }
 
-.otta-docs-toc-list {
+.otta-docs-toc [data-slot='toc-list'] {
     list-style: none;
     padding: 0;
     margin: 0;
 }
 
-.otta-docs-toc-link {
+.otta-docs-toc [data-slot='toc-link'] {
     display: block;
     width: 100%;
     font-size: 12px;
     line-height: 1.5;
     padding: 3px 8px;
+    /* --toc-depth is 0 for the shallowest heading (set by @ottabase/ui's TableOfContents) */
+    padding-left: calc(var(--toc-depth, 0) * 12px + 12px);
     border: none;
     border-left: 3px solid transparent;
     border-radius: 0;
@@ -290,11 +292,11 @@
     transition: all 0.15s;
 }
 
-.otta-docs-toc-link:hover {
+.otta-docs-toc [data-slot='toc-link']:hover {
     color: var(--otta-docs-color-text);
 }
 
-.otta-docs-toc-active {
+.otta-docs-toc [data-slot='toc-link'][data-active] {
     color: var(--otta-docs-color-primary) !important;
     border-left-color: var(--otta-docs-color-primary);
 }

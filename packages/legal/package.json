@@ -32,14 +32,19 @@
         "@ottabase/utils": "workspace:*"
     },
     "peerDependencies": {
+        "@ottabase/ui": "workspace:*",
         "react": "catalog:"
     },
     "peerDependenciesMeta": {
+        "@ottabase/ui": {
+            "optional": true
+        },
         "react": {
             "optional": true
         }
     },
     "devDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@types/node": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",

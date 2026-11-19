@@ -39,7 +39,7 @@
     border-radius: 0.75rem;
     background: var(--otta-legal-surface);
 }
-.otta-legal-toc-title {
+.otta-legal-toc [data-slot='toc-title'] {
     margin: 0 0 0.5rem;
     font-size: 0.75rem;
     font-weight: 600;

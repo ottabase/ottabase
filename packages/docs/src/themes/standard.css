@@ -50,6 +50,6 @@
     padding: 12px 16px;
 }
 
-.otta-docs-theme-standard .otta-docs-toc-link {
+.otta-docs-theme-standard .otta-docs-toc [data-slot='toc-link'] {
     font-size: 13px;
 }

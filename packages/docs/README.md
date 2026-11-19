@@ -29,7 +29,8 @@ The package splits along a UI boundary so the `.` barrel pulls in zero rendered 
 - `@ottabase/docs` — pure, tree-shakeable helpers and types: `buildPageSlug`, `extractTitle`, `extractToc`,
   `fileNameToSlug`, `findPageBySlug`, `organizePages`, `slugToTitle`, the `useDocs` hook, and all type re-exports.
 - `@ottabase/docs/react` — rendered components: `DocsLayout`, `DocsSidebar`, `MarkdownRenderer`, `TableOfContents` (this
-  is the only entry that value-imports `@ottabase/ui-code-highlight`, an optional peer).
+  is the only entry that value-imports `@ottabase/ui-code-highlight` and `@ottabase/ui`, optional peers needed only
+  here).
 
 ## Quick Start
 

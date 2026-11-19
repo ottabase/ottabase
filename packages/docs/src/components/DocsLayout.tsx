@@ -36,7 +36,6 @@ function getThemeClass(theme?: string): string {
  */
 export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: DocsLayoutProps) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [activeTocId, setActiveTocId] = useState<string>('');
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const [resolvedContent, setResolvedContent] = useState<string>('');
     const [isLoadingContent, setIsLoadingContent] = useState(false);
@@ -110,42 +109,10 @@ export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: D
     const handleNavigate = useCallback(
         (slug: string) => {
             closeMobileNav();
-            setActiveTocId('');
             onNavigate?.(slug);
         },
         [closeMobileNav, onNavigate],
     );
-
-    const handleTocClick = useCallback((id: string) => {
-        setActiveTocId(id);
-        const el = document.getElementById(id);
-        if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, []);
-
-    // Track scroll position for TOC highlighting
-    useEffect(() => {
-        if (!activePage) return;
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting) {
-                        setActiveTocId(entry.target.id);
-                    }
-                }
-            },
-            { rootMargin: '-80px 0px -70% 0px', threshold: 0 },
-        );
-
-        const headings = document.querySelectorAll(
-            '.otta-docs-content h2, .otta-docs-content h3, .otta-docs-content h4',
-        );
-        headings.forEach((h) => observer.observe(h));
-
-        return () => observer.disconnect();
-    }, [activePage]);
 
     useEffect(() => {
         if (!mobileNavOpen) return;
@@ -242,13 +209,8 @@ export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: D
                             )}
                         </article>
 
-                        {/* Right TOC */}
-                        <TableOfContents
-                            content={resolvedContent}
-                            activeId={activeTocId}
-                            onItemClick={handleTocClick}
-                            className="otta-docs-toc-sidebar"
-                        />
+                        {/* Right TOC: follows the scroll over the rendered headings and scrolls on click */}
+                        <TableOfContents content={resolvedContent} className="otta-docs-toc-sidebar" />
                     </>
                 ) : (
                     <div className="otta-docs-empty">

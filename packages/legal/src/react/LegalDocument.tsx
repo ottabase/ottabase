@@ -4,6 +4,7 @@
  * `import '@ottabase/legal/styles.css'`.
  */
 
+import { TableOfContents } from '@ottabase/ui';
 import { type ReactNode } from 'react';
 import { assembleLegalDocument } from '../assemble';
 import type { LegalConfig, LegalDocId } from '../types';
@@ -32,16 +33,14 @@ export function LegalDocument({ docId, config, renderMarkdown, toc = true, class
             {doc.lastUpdated ? <p className="otta-legal-meta">Last updated {doc.lastUpdated}</p> : null}
 
             {toc && tocItems.length > 1 ? (
-                <nav className="otta-legal-toc" aria-label="On this page">
-                    <p className="otta-legal-toc-title">On this page</p>
-                    <ol>
-                        {tocItems.map((t) => (
-                            <li key={t.id}>
-                                <a href={`#${t.id}`}>{t.text}</a>
-                            </li>
-                        ))}
-                    </ol>
-                </nav>
+                // @ottabase/ui's TableOfContents, unstyled and dressed by styles.css (.otta-legal-toc [data-slot=…])
+                <TableOfContents
+                    unstyled
+                    className="otta-legal-toc"
+                    aria-label="On this page"
+                    title="On this page"
+                    items={tocItems.map((t) => ({ id: t.id, label: t.text, depth: t.level }))}
+                />
             ) : null}
 
             {renderMarkdown ? renderMarkdown(doc.markdown) : <LegalMarkdown markdown={doc.markdown} />}

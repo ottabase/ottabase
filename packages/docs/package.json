@@ -47,11 +47,15 @@
     "author": "",
     "license": "MIT",
     "peerDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@ottabase/ui-code-highlight": "workspace:*",
         "react": "catalog:",
         "react-dom": "catalog:"
     },
     "peerDependenciesMeta": {
+        "@ottabase/ui": {
+            "optional": true
+        },
         "@ottabase/ui-code-highlight": {
             "optional": true
         }
@@ -60,6 +64,7 @@
         "@ottabase/utils": "workspace:*"
     },
     "devDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@ottabase/ui-code-highlight": "workspace:*",
         "@types/node": "catalog:",
         "@types/react": "catalog:",
