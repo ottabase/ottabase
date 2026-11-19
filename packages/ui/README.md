@@ -281,6 +281,51 @@ import {
   in `currentColor` follows the theme, and a fixed fill is kept for multicolour marks.
 - **VisuallyHidden** keeps text for screen readers only (`sr-only`); `asChild` hides your own element.
 
+## Input building blocks
+
+`NumberInput`, `PasswordInput`, `FileInput` and `ColorInput` are on the root and on their own entries
+(`@ottabase/ui/number-input`, …). Each forwards its ref to the native `<input>` and stamps `data-slot` parts.
+
+```tsx
+import { ColorInput, FileInput, NumberInput, PasswordInput, Slider, Textarea } from '@ottabase/ui';
+
+// Number: typed as text (inputMode="decimal"), value is number | null
+<NumberInput value={price} onChange={setPrice} min={0} max={10_000} step={0.5} decimalScale={2}
+    prefix="$" thousandSeparator name="price" />
+<NumberInput value={ms} onChange={(v) => setMs(v ?? 0)} min={0} decimalScale={0} suffix="ms" hideControls />
+
+// Password: reveal toggle, opt-in rule checklist (true = passwordRequirements(minLength ?? 8))
+<PasswordInput id="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" requirements />
+<PasswordInput requirements={[{ label: 'No spaces', test: (p) => !/\s/.test(p) }]} />
+
+// File: click-to-choose box; maxSize refuses with a message; previews a picked image
+<FileInput accept="image/*" maxSize={2 * 1024 * 1024} imagePreview onChange={([file]) => upload(file)} onClear={reset} />
+<FileInput multiple loading={uploading} error={uploadError} previewUrl={savedUrl} />
+
+// Color: swatch + native picker + hex text; value is '#rrggbb' | null
+<ColorInput value={accent} onChange={setAccent} swatches={['#0ea5e9', '#22c55e', '#f97316']} clearable />
+
+// Range slider: one thumb per value
+<Slider defaultValue={[20, 80]} thumbLabels={['Minimum', 'Maximum']} />
+
+// Textarea that grows with its content (CSS field-sizing, no JS)
+<Textarea autosize minRows={2} maxRows={8} />
+```
+
+- **NumberInput** keeps what you type while you edit: a number in range applies as typed, leaving the field (or Enter)
+  clamps the rest (`clampOnBlur`, default on). ArrowUp/ArrowDown step (Shift ×10); the stepper buttons are mouse-only
+  (`hideControls` hides them). `allowNegative` defaults to `min < 0`. `name` writes the plain number to a hidden input,
+  so a native form posts `1234.5`, never `$1,234.50`. With react-hook-form use a `Controller` (the value is a number,
+  not an event). `className` styles the box, `inputClassName` the text field.
+- **PasswordInput**'s toggle is a pressed-state button named "Show password". The checklist (`requirements`) appears
+  once something is typed and is linked to the field with `aria-describedby`.
+- **FileInput**'s native input sits inside the box, visually hidden but focusable, so keyboard and screen readers get
+  the platform picker. `previewUrl` overrides the automatic preview (sanitise untrusted URLs); the remove button shows
+  only with `onClear`. Uploading stays with the caller (`@ottabase/forms` FormField does it for `file`/`image` fields).
+- **ColorInput** accepts `#abc`, `abc` or `#aabbcc` and emits lowercase `#rrggbb`; invalid text is flagged
+  (`aria-invalid`) and reverts on blur. Hex only.
+- **Checkbox** with `checked="indeterminate"` shows a dash.
+
 ## Theming hooks (Brand Engine)
 
 Components are fully themeable by the brand engine without forking:

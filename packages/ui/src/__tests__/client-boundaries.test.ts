@@ -13,6 +13,10 @@ const statefulComposedComponents = [
     'rating.tsx',
     'split-pane.tsx',
     'tree-view.tsx',
+    'number-input.tsx',
+    'password-input.tsx',
+    'file-input.tsx',
+    'color-input.tsx',
 ];
 
 describe('React Server Component boundaries', () => {

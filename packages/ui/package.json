@@ -323,6 +323,26 @@
             "import": "./dist/timeline.mjs",
             "require": "./dist/timeline.js"
         },
+        "./number-input": {
+            "types": "./dist/number-input.d.ts",
+            "import": "./dist/number-input.mjs",
+            "require": "./dist/number-input.js"
+        },
+        "./password-input": {
+            "types": "./dist/password-input.d.ts",
+            "import": "./dist/password-input.mjs",
+            "require": "./dist/password-input.js"
+        },
+        "./file-input": {
+            "types": "./dist/file-input.d.ts",
+            "import": "./dist/file-input.mjs",
+            "require": "./dist/file-input.js"
+        },
+        "./color-input": {
+            "types": "./dist/color-input.d.ts",
+            "import": "./dist/color-input.mjs",
+            "require": "./dist/color-input.js"
+        },
         "./tree-view": {
             "types": "./dist/tree-view.d.ts",
             "import": "./dist/tree-view.mjs",

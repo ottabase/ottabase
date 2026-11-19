@@ -4,6 +4,15 @@ export { Badge, badgeVariants } from './badge';
 export { Button, buttonVariants } from './button';
 export { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './card';
 export { Input, type InputProps } from './input';
+export { NumberInput, formatNumberInput, parseNumberInput, type NumberInputProps } from './number-input';
+export {
+    PasswordInput,
+    passwordRequirements,
+    type PasswordInputProps,
+    type PasswordRequirement,
+} from './password-input';
+export { FileInput, formatFileSize, type FileInputProps } from './file-input';
+export { ColorInput, normalizeHex, type ColorInputProps } from './color-input';
 export { Label, type LabelProps } from './label';
 export { Separator, type SeparatorProps } from './separator';
 export { Switch } from './switch';
