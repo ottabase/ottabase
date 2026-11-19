@@ -10,6 +10,7 @@
 
 import { PACKAGES_ENABLED } from '@/ottabase/config/packages';
 import { isApiError } from '@ottabase/api';
+import { setStorageValue } from '@ottabase/ui';
 
 /** Read by `@ottabase/helpdesk/react` (SupportCenter). Change both together. */
 export const SUPPORT_DRAFT_KEY = 'ottabase.support-draft';
@@ -52,11 +53,8 @@ export function problemDraft(error: unknown, page: string, now = Date.now()): Pr
 
 /** Open /support with the draft. `newTab` keeps the page the customer was on (a toast, an inline error). */
 export function reportProblem(error: unknown, { newTab = false } = {}): void {
-    try {
-        localStorage.setItem(SUPPORT_DRAFT_KEY, JSON.stringify(problemDraft(error, window.location.pathname)));
-    } catch {
-        // Storage blocked: the page still opens, just empty.
-    }
+    // Storage blocked: the page still opens, just empty.
+    setStorageValue(SUPPORT_DRAFT_KEY, problemDraft(error, window.location.pathname));
     if (newTab) window.open('/support', '_blank', 'noopener');
     else window.location.assign('/support');
 }

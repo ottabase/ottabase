@@ -120,6 +120,7 @@ vi.mock('@ottabase/ui', () => {
         TableHead: Div,
         TableHeader: Div,
         TableRow: Div,
+        setStorageValue: () => {},
     };
 });
 

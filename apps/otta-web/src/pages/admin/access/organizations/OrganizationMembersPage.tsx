@@ -30,6 +30,7 @@ import {
     TableHead,
     TableHeader,
     TableRow,
+    setStorageValue,
 } from '@ottabase/ui';
 import { Link, useParams } from '@tanstack/react-router';
 import { useSetAtom } from 'jotai';
@@ -69,11 +70,7 @@ export function OrganizationMembersPage() {
         if (!organizationId) return;
         setOrganizationId(organizationId);
         setCurrentPage(1);
-        try {
-            localStorage.setItem(CURRENT_ORG_KEY, organizationId);
-        } catch {
-            // ignore storage failures
-        }
+        setStorageValue(CURRENT_ORG_KEY, organizationId);
     }, [organizationId, setOrganizationId]);
 
     const handleRefresh = async () => {

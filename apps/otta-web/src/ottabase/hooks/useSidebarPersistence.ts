@@ -4,6 +4,7 @@
  */
 import { useEffect } from 'react';
 import { useAtom } from 'jotai';
+import { getStorageValue, setStorageValue } from '@ottabase/ui';
 import { sidebarStateAtom, type SidebarState } from '@/ottabase/state/appState';
 
 const STORAGE_KEY = 'ottabase.sidebar-state';
@@ -11,25 +12,14 @@ const STORAGE_KEY = 'ottabase.sidebar-state';
 export function useSidebarPersistence(): void {
     const [sidebarState, setSidebarState] = useAtom(sidebarStateAtom);
 
-    // Load from localStorage on mount
+    // Load from localStorage on mount (blocked storage or a corrupt value keeps the default)
     useEffect(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                const state: SidebarState = JSON.parse(stored);
-                setSidebarState(state);
-            }
-        } catch (error) {
-            console.warn('Failed to load sidebar state from localStorage:', error);
-        }
+        const stored = getStorageValue<SidebarState | null>(STORAGE_KEY, null);
+        if (stored && typeof stored === 'object') setSidebarState(stored);
     }, [setSidebarState]);
 
     // Save to localStorage whenever state changes
     useEffect(() => {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(sidebarState));
-        } catch (error) {
-            console.warn('Failed to save sidebar state to localStorage:', error);
-        }
+        setStorageValue(STORAGE_KEY, sidebarState);
     }, [sidebarState]);
 }

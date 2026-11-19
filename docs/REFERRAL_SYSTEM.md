@@ -305,10 +305,9 @@ if (!result.valid) {
 
 Keys used by the template client (`src/lib/referrals.ts`):
 
-| Key                           | Purpose                         |
-| ----------------------------- | ------------------------------- |
-| `ottabase.referral-code`      | Active referral code            |
-| `ottabase.referral-timestamp` | Stored at write time for expiry |
+| Key                 | Purpose                                                                     |
+| ------------------- | --------------------------------------------------------------------------- |
+| `ottabase.referral` | JSON `{ code, storedAt }`: the first-touch code and its write time (expiry) |
 
 Values honor `features.referrals.expiryDays`. Clearing or private browsing behaves like any other `localStorage`
 feature.

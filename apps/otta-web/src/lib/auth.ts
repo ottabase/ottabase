@@ -18,6 +18,7 @@ import {
     type SessionState,
 } from '@ottabase/auth/react';
 import { PLATFORM_ORG_SENTINEL } from '@ottabase/config';
+import { getStorageValue, setStorageValue } from '@ottabase/ui';
 import { hasGrantedPermission } from '@ottabase/utils/permissions';
 import { useSetAtom } from 'jotai';
 import { useEffect } from 'react';
@@ -25,12 +26,9 @@ import { APP_ID } from '@/ottabase/config';
 
 const CURRENT_ORG_KEY = 'ottabase.current-org-id';
 
+// Stored as JSON through the shared storage helpers, so the org switcher's useLocalStorage hook stays in sync
 function getStoredOrganizationId(): string | null {
-    try {
-        return localStorage.getItem(CURRENT_ORG_KEY);
-    } catch {
-        return null;
-    }
+    return getStorageValue<string | null>(CURRENT_ORG_KEY, null);
 }
 
 // Re-export types
@@ -136,15 +134,8 @@ function useAppSessionState(sessionData: SessionState): SessionState {
 
         setOrganizationId(effectiveOrgId);
 
-        try {
-            if (effectiveOrgId) {
-                localStorage.setItem(CURRENT_ORG_KEY, effectiveOrgId);
-            } else {
-                localStorage.removeItem(CURRENT_ORG_KEY);
-            }
-        } catch {
-            // ignore storage failures
-        }
+        // Storage failures are ignored inside the helper
+        setStorageValue(CURRENT_ORG_KEY, effectiveOrgId || undefined);
     }, [
         sessionData.user,
         sessionData.isAuthenticated,
@@ -163,11 +154,7 @@ function useAppSessionState(sessionData: SessionState): SessionState {
             setGlobalUser(null);
             setGlobalIsAuthenticated(false);
             setOrganizationId(null);
-            try {
-                localStorage.removeItem(CURRENT_ORG_KEY);
-            } catch {
-                // ignore storage failures
-            }
+            setStorageValue(CURRENT_ORG_KEY, undefined);
         };
         const handleStorage = (event: StorageEvent) => {
             if (event.key === AUTH_STORAGE_KEY && event.newValue === null) clearClientAuthState();

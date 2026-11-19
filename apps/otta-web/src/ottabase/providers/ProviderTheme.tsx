@@ -1,23 +1,16 @@
 import type { BrandTheme, ResolvedBrandTheme } from '@ottabase/brand-engine';
 import { useBrand } from '@ottabase/brand-engine-react';
 import type { LayoutConfig } from '@ottabase/ottalayout';
-import { useCallback, useMemo, useState } from 'react';
+import { useLocalStorage } from '@ottabase/ui';
+import { useCallback, useMemo } from 'react';
 import { ThemeProviderContext } from './ThemeContext';
 
 const LAYOUT_OVERRIDES_KEY = 'ottabase.layout-overrides';
+const NO_OVERRIDES: Partial<LayoutConfig> = {};
 
 type ThemeProviderProps = {
     children: React.ReactNode;
 };
-
-function loadLayoutOverrides(): Partial<LayoutConfig> {
-    try {
-        const stored = localStorage.getItem(LAYOUT_OVERRIDES_KEY);
-        return stored ? JSON.parse(stored) : {};
-    } catch {
-        return {};
-    }
-}
 
 function mergeLayout(base: LayoutConfig | undefined | null, overrides: Partial<LayoutConfig>): LayoutConfig | null {
     if (!base) return null;
@@ -28,7 +21,7 @@ function mergeLayout(base: LayoutConfig | undefined | null, overrides: Partial<L
 /** Theme is app-level (Brand Engine). User can only switch light/dark. */
 export function ThemeProvider({ children }: ThemeProviderProps) {
     const { config } = useBrand();
-    const [layoutOverrides, setLayoutOverridesState] = useState<Partial<LayoutConfig>>(loadLayoutOverrides);
+    const [layoutOverrides, setLayoutOverrides] = useLocalStorage(LAYOUT_OVERRIDES_KEY, NO_OVERRIDES);
 
     const {
         theme: themeBase,
@@ -67,19 +60,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
         };
     }, [config]);
 
-    const setLayoutOverrides = useCallback((overrides: Partial<LayoutConfig>) => {
-        setLayoutOverridesState(overrides);
-        try {
-            localStorage.setItem(LAYOUT_OVERRIDES_KEY, JSON.stringify(overrides));
-        } catch {
-            // storage full – silent fail
-        }
-    }, []);
-
-    const resetLayoutOverrides = useCallback(() => {
-        setLayoutOverridesState({});
-        localStorage.removeItem(LAYOUT_OVERRIDES_KEY);
-    }, []);
+    // Removing the key falls back to no overrides
+    const resetLayoutOverrides = useCallback(() => setLayoutOverrides(undefined), [setLayoutOverrides]);
 
     const layout = useMemo(() => mergeLayout(resolved?.layout, layoutOverrides), [resolved?.layout, layoutOverrides]);
 

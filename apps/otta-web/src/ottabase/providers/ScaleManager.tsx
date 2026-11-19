@@ -11,6 +11,7 @@
  * Also persists the scale to localStorage so it survives page reloads.
  */
 import { scaleAtom } from '@/ottabase/state/appState';
+import { getStorageValue, setStorageValue } from '@ottabase/ui';
 import { useAtom } from 'jotai';
 import { useEffect } from 'react';
 
@@ -21,33 +22,17 @@ export function ScaleManager(): null {
 
     // Hydrate from localStorage on mount
     useEffect(() => {
-        try {
-            const stored = localStorage.getItem(SCALE_STORAGE_KEY);
-            if (stored) {
-                const parsed = parseFloat(stored);
-                if (!isNaN(parsed) && parsed >= 0.5 && parsed <= 2) {
-                    setScale(parsed);
-                }
-            }
-        } catch {
-            // storage unavailable
+        const stored = getStorageValue<unknown>(SCALE_STORAGE_KEY, null);
+        if (typeof stored === 'number' && stored >= 0.5 && stored <= 2) {
+            setScale(stored);
         }
     }, [setScale]);
 
-    // Apply scale to document root and persist
+    // Apply scale to document root and persist (the default 1.0 removes the key)
     useEffect(() => {
         const pct = Math.round(scale * 100);
         document.documentElement.style.fontSize = `${pct}%`;
-
-        try {
-            if (scale === 1.0) {
-                localStorage.removeItem(SCALE_STORAGE_KEY);
-            } else {
-                localStorage.setItem(SCALE_STORAGE_KEY, String(scale));
-            }
-        } catch {
-            // storage full
-        }
+        setStorageValue(SCALE_STORAGE_KEY, scale === 1.0 ? undefined : scale);
 
         return () => {
             // Reset on unmount (e.g. HMR)

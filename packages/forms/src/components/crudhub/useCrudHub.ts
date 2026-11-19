@@ -4,6 +4,7 @@
 
 import type { CrudHubModelDescriptor } from '@ottabase/ottaorm';
 import { getStableQuerySignal } from '@ottabase/ottaorm/client';
+import { getStorageValue, setStorageValue } from '@ottabase/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useFormRequest } from '../../hooks/useFormRequest';
@@ -98,20 +99,12 @@ export interface RememberedListState {
     columns?: Record<string, boolean>;
 }
 
-/** Per-model list preferences in localStorage, wrapped so a blocked storage never breaks the page. */
+/** Per-model list preferences in localStorage; blocked storage or a corrupt value reads as no preferences. */
 export function readRemembered(entity: string): RememberedListState {
-    try {
-        const raw = localStorage.getItem(STORAGE_PREFIX + entity);
-        return raw ? (JSON.parse(raw) as RememberedListState) : {};
-    } catch {
-        return {};
-    }
+    const value = getStorageValue<unknown>(STORAGE_PREFIX + entity, {});
+    return value && typeof value === 'object' ? (value as RememberedListState) : {};
 }
 
 export function writeRemembered(entity: string, patch: RememberedListState): void {
-    try {
-        localStorage.setItem(STORAGE_PREFIX + entity, JSON.stringify({ ...readRemembered(entity), ...patch }));
-    } catch {
-        // Private mode or blocked storage: preferences simply do not persist.
-    }
+    setStorageValue(STORAGE_PREFIX + entity, { ...readRemembered(entity), ...patch });
 }

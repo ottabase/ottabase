@@ -1,16 +1,15 @@
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { OrganizationSwitcher } from '@/components/OrganizationSwitcher';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { api } from '@/lib/api';
 import { useSession } from '@/lib/auth';
 import { i18nConfig } from '@/ottabase/config/i18n.config';
 import { organizationIdAtom } from '@/ottabase/state/appState';
 import { PLATFORM_ORG_SENTINEL } from '@ottabase/config';
-import { DarkModeToggle } from '@ottabase/ui';
+import { DarkModeToggle, useLocalStorage } from '@ottabase/ui';
 import { useSetAtom } from 'jotai';
 
 function useOrganizationSelection() {
-    const [currentOrgId, setCurrentOrgId] = useLocalStorage<string>('ottabase.current-org-id');
+    const [currentOrgId, setCurrentOrgId] = useLocalStorage<string | undefined>('ottabase.current-org-id', undefined);
     const setOrganizationId = useSetAtom(organizationIdAtom);
     const { refreshSession } = useSession();
 

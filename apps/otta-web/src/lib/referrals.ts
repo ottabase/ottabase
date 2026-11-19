@@ -5,11 +5,21 @@
  */
 
 import { REFERRALS_CONFIG } from '@/ottabase/config';
+import { getStorageValue, setStorageValue } from '@ottabase/ui';
 import { api } from './api';
 
-// Local storage keys
-const REFERRAL_CODE_KEY = 'ottabase.referral-code';
-const REFERRAL_TIMESTAMP_KEY = 'ottabase.referral-timestamp';
+// Local storage key: the first-touch code and when it was stored
+const REFERRAL_KEY = 'ottabase.referral';
+
+interface StoredReferral {
+    code: string;
+    storedAt: number;
+}
+
+function readStoredReferral(): StoredReferral | null {
+    const stored = getStorageValue<StoredReferral | null>(REFERRAL_KEY, null);
+    return stored && typeof stored.code === 'string' && typeof stored.storedAt === 'number' ? stored : null;
+}
 
 /**
  * URL query-param key that carries an inbound referral code (e.g. `ref` in
@@ -40,66 +50,38 @@ function isReferralExpired(timestamp: number): boolean {
  * Get the stored referral code (if valid and not expired)
  */
 export function getStoredReferralCode(): string | null {
-    if (typeof window === 'undefined') return null;
+    const stored = readStoredReferral();
+    if (!stored) return null;
 
-    try {
-        const code = localStorage.getItem(REFERRAL_CODE_KEY);
-        const timestamp = localStorage.getItem(REFERRAL_TIMESTAMP_KEY);
-
-        if (!code || !timestamp) {
-            return null;
-        }
-
-        const timestampNum = parseInt(timestamp, 10);
-
-        // Check if expired
-        if (isReferralExpired(timestampNum)) {
-            clearStoredReferralCode();
-            return null;
-        }
-
-        return code;
-    } catch (error) {
-        console.error('Error reading referral code:', error);
+    // Check if expired
+    if (isReferralExpired(stored.storedAt)) {
+        clearStoredReferralCode();
         return null;
     }
+
+    return stored.code;
 }
 
 /**
  * Store a referral code in local storage
  */
 export function storeReferralCode(code: string): void {
-    if (typeof window === 'undefined') return;
-
-    try {
-        // Only store if there's no existing code (first-touch wins)
-        const existing = getStoredReferralCode();
-        if (existing) {
-            console.log('Referral code already stored (first-touch wins):', existing);
-            return;
-        }
-
-        localStorage.setItem(REFERRAL_CODE_KEY, code);
-        localStorage.setItem(REFERRAL_TIMESTAMP_KEY, Date.now().toString());
-
-        console.log('Stored referral code:', code);
-    } catch (error) {
-        console.error('Error storing referral code:', error);
+    // Only store if there's no existing code (first-touch wins)
+    const existing = getStoredReferralCode();
+    if (existing) {
+        console.log('Referral code already stored (first-touch wins):', existing);
+        return;
     }
+
+    setStorageValue<StoredReferral>(REFERRAL_KEY, { code, storedAt: Date.now() });
+    console.log('Stored referral code:', code);
 }
 
 /**
  * Clear stored referral code
  */
 export function clearStoredReferralCode(): void {
-    if (typeof window === 'undefined') return;
-
-    try {
-        localStorage.removeItem(REFERRAL_CODE_KEY);
-        localStorage.removeItem(REFERRAL_TIMESTAMP_KEY);
-    } catch (error) {
-        console.error('Error clearing referral code:', error);
-    }
+    setStorageValue(REFERRAL_KEY, undefined);
 }
 
 /**
@@ -192,9 +174,9 @@ export function getReferralExpiryInfo(): {
     daysRemaining: number | null;
     isExpired: boolean;
 } {
-    const timestamp = localStorage.getItem(REFERRAL_TIMESTAMP_KEY);
+    const stored = readStoredReferral();
 
-    if (!timestamp) {
+    if (!stored) {
         return {
             expiresAt: null,
             daysRemaining: null,
@@ -202,7 +184,7 @@ export function getReferralExpiryInfo(): {
         };
     }
 
-    const timestampNum = parseInt(timestamp, 10);
+    const timestampNum = stored.storedAt;
     const expiresAt = new Date(timestampNum + getReferralExpiryMs());
     const daysRemaining = Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     const expired = isReferralExpired(timestampNum);

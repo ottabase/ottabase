@@ -48,9 +48,6 @@ vi.mock('@/components/ReferralTracker', () => ({
     ReferralTracker: () => <div data-testid="referral-tracker" />,
 }));
 // otta:end referrals
-vi.mock('@/hooks/useLocalStorage', () => ({
-    useLocalStorage: () => [null, vi.fn()],
-}));
 vi.mock('@/ottabase/config', () => ({
     APP_META: { appName: 'Test App', tagline: 'Test Tagline' },
     APP_ID: 'test-app',
@@ -63,6 +60,7 @@ vi.mock('@/ottabase/config/i18n.config', () => ({
     i18nConfig: { enabledLanguages: ['en'] },
 }));
 vi.mock('@ottabase/ui', () => ({
+    useLocalStorage: () => [undefined, vi.fn()],
     cn: (...inputs: unknown[]) => inputs.filter(Boolean).join(' '),
     buttonVariants: () => '',
     AlertDialog: ({ children }: any) => <div data-testid="alert-dialog">{children}</div>,

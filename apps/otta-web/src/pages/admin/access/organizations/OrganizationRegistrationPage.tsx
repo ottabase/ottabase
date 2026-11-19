@@ -25,6 +25,7 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    setStorageValue,
 } from '@ottabase/ui';
 import { useNavigate } from '@tanstack/react-router';
 import { useSetAtom } from 'jotai';
@@ -77,11 +78,7 @@ export function OrganizationRegistrationPage() {
 
     const applyCurrentOrganization = (orgId: string) => {
         setOrganizationId(orgId);
-        try {
-            localStorage.setItem(CURRENT_ORG_KEY, orgId);
-        } catch {
-            // ignore storage failures
-        }
+        setStorageValue(CURRENT_ORG_KEY, orgId);
     };
 
     const validate = (): boolean => {
