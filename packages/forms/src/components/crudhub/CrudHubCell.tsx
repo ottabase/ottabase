@@ -9,6 +9,7 @@
 // ============================================================
 
 import type { ModelFieldDescriptor } from '@ottabase/ottaorm';
+import { JsonEditor, type JsonValue as JsonEditorValue } from '@ottabase/ui/json-editor';
 import { sanitizeUrl } from '@ottabase/utils/sanitize';
 import { formatDateForUser } from '@ottabase/utils/timezone';
 import { clsx } from 'clsx';
@@ -197,17 +198,21 @@ export function CrudHubCell({
     return <span>{text}</span>;
 }
 
-/** Arrays and objects: compact inline in tables with a popover viewer; full pretty JSON in details. */
+/** Arrays and objects: compact inline in tables with a popover viewer; a read-only JsonEditor tree in details. */
 function JsonValue({ value, mode }: { value: unknown; mode: CrudHubCellMode }) {
     const [open, setOpen] = useState(false);
     const pretty = JSON.stringify(value, null, 2);
     if (mode === 'details') {
         return (
-            <pre className="max-h-72 overflow-auto rounded-lg bg-muted/40 p-3 text-xs">
-                <code>{pretty}</code>
-            </pre>
+            <JsonEditor
+                readOnly
+                value={value as JsonEditorValue}
+                collapseAtDepth={2}
+                className="max-h-72 overflow-auto"
+            />
         );
     }
+    // A table cell keeps the light quick-look popover: a full tree viewer per cell would be heavy
     const preview = inlinePreview(value);
     return (
         <span className="relative inline-block">

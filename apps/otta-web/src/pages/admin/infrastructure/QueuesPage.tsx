@@ -18,6 +18,7 @@ import {
     CardTitle,
     ConfirmDialog,
 } from '@ottabase/ui';
+import { JsonEditor, type JsonValue } from '@ottabase/ui/json-editor';
 import { api, isApiError } from '@/lib/api';
 import {
     ArrowLeft,
@@ -781,9 +782,12 @@ export function AdminQueuePage() {
                                                             <summary className="cursor-pointer text-xs text-muted-foreground transition-colors duration-normal hover:text-foreground">
                                                                 View Payload
                                                             </summary>
-                                                            <pre className="mt-1 overflow-auto rounded-lg bg-muted/40 p-2 font-mono text-xs">
-                                                                {JSON.stringify(job.payload, null, 2)}
-                                                            </pre>
+                                                            <JsonEditor
+                                                                readOnly
+                                                                value={(job.payload ?? null) as JsonValue}
+                                                                rootLabel="payload"
+                                                                className="mt-1 max-h-72 overflow-auto"
+                                                            />
                                                         </details>
                                                     </div>
                                                     <div className="flex flex-col items-end gap-2">

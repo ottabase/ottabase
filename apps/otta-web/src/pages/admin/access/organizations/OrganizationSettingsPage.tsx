@@ -17,6 +17,7 @@ import {
     CardHeader,
     CardTitle,
     ConfirmDialog,
+    CopyButton,
     Input,
     Label,
     Select,
@@ -25,7 +26,9 @@ import {
     SelectTrigger,
     SelectValue,
     Separator,
+    setStorageValue,
 } from '@ottabase/ui';
+import { JsonEditor, type JsonValue } from '@ottabase/ui/json-editor';
 import { Link, useParams } from '@tanstack/react-router';
 import { useSetAtom } from 'jotai';
 import { AlertTriangle, ArrowLeft, Building2, Loader2, Trash2 } from 'lucide-react';
@@ -62,11 +65,8 @@ export function OrganizationSettingsPage() {
     useEffect(() => {
         if (!organizationId) return;
         setOrganizationId(organizationId);
-        try {
-            localStorage.setItem(CURRENT_ORG_KEY, organizationId);
-        } catch {
-            // ignore storage failures
-        }
+        // Same JSON format lib/auth.ts reads; storage failures are swallowed inside
+        setStorageValue(CURRENT_ORG_KEY, organizationId);
     }, [organizationId, setOrganizationId]);
 
     // Initialize form data when org loads
@@ -175,17 +175,14 @@ export function OrganizationSettingsPage() {
                             <code className="flex-1 rounded-md bg-background px-3 py-2 text-sm text-muted-foreground ring-1 ring-border">
                                 {org.id}
                             </code>
-                            <Button
-                                variant="ghost"
-                                size="sm"
+                            <CopyButton
+                                value={org.id}
+                                label="organization ID"
+                                notify
                                 className="text-muted-foreground hover:text-foreground"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(org.id);
-                                    toast.success('Copied', 'Organization ID copied to clipboard');
-                                }}
                             >
                                 Copy
-                            </Button>
+                            </CopyButton>
                         </div>
                     </div>
 
@@ -292,17 +289,14 @@ export function OrganizationSettingsPage() {
                             <code className="flex-1 rounded-md bg-background px-3 py-2 text-sm text-muted-foreground ring-1 ring-border">
                                 {org.ownerId}
                             </code>
-                            <Button
-                                variant="ghost"
-                                size="sm"
+                            <CopyButton
+                                value={org.ownerId}
+                                label="owner ID"
+                                notify
                                 className="text-muted-foreground hover:text-foreground"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(org.ownerId);
-                                    toast.success('Copied', 'Owner ID copied to clipboard');
-                                }}
                             >
                                 Copy
-                            </Button>
+                            </CopyButton>
                         </div>
                     </div>
 
@@ -311,9 +305,7 @@ export function OrganizationSettingsPage() {
                         <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                             Settings
                         </Label>
-                        <pre className="overflow-x-auto rounded-lg bg-background p-3 text-xs text-muted-foreground ring-1 ring-border">
-                            {JSON.stringify(org.settings ?? {}, null, 2)}
-                        </pre>
+                        <JsonEditor readOnly value={(org.settings ?? {}) as JsonValue} rootLabel="settings" />
                     </div>
 
                     {/* Metadata */}
@@ -321,9 +313,7 @@ export function OrganizationSettingsPage() {
                         <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                             Metadata
                         </Label>
-                        <pre className="overflow-x-auto rounded-lg bg-background p-3 text-xs text-muted-foreground ring-1 ring-border">
-                            {JSON.stringify(org.metadata ?? {}, null, 2)}
-                        </pre>
+                        <JsonEditor readOnly value={(org.metadata ?? {}) as JsonValue} rootLabel="metadata" />
                     </div>
 
                     {/* Save Button */}

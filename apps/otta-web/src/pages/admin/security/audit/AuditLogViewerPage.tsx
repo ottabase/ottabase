@@ -10,6 +10,7 @@ import {
     Collapsible,
     CollapsibleContent,
     CollapsibleTrigger,
+    DiffView,
     Input,
     Select,
     SelectContent,
@@ -26,7 +27,9 @@ import {
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
+    useClipboard,
 } from '@ottabase/ui';
+import { JsonEditor, type JsonValue } from '@ottabase/ui/json-editor';
 import { Link } from '@tanstack/react-router';
 import {
     AlertTriangle,
@@ -87,6 +90,28 @@ function parseMetadata(raw: string | null | undefined): Record<string, unknown> 
     }
 }
 
+/**
+ * `{ field: { from?, to? } }`, the shape `logUpdate` and the role helpers write, as before/after records for a
+ * DiffView. Null for any other shape (`{ created: {...} }`, `{ request: {...} }`), which shows as JSON instead.
+ */
+export function changesAsBeforeAfter(
+    changes: Record<string, unknown>,
+): { before: Record<string, unknown>; after: Record<string, unknown> } | null {
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    const entries = Object.entries(changes);
+    if (entries.length === 0) return null;
+    for (const [key, value] of entries) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        const parts = Object.keys(value);
+        if (parts.length === 0 || parts.some((part) => part !== 'from' && part !== 'to')) return null;
+        const change = value as { from?: unknown; to?: unknown };
+        if ('from' in change) before[key] = change.from;
+        if ('to' in change) after[key] = change.to;
+    }
+    return { before, after };
+}
+
 /** Get a short summary of metadata for display */
 function metadataSummary(raw: string | null | undefined): string {
     const parsed = parseMetadata(raw);
@@ -144,14 +169,12 @@ function humanizeAction(action: string): string {
 
 /** Copyable ID cell — shows truncated ID, copies full on click */
 function CopyableId({ id, label }: { id: string | null | undefined; label?: string }) {
-    const [copied, setCopied] = useState(false);
+    const { copy, copied } = useClipboard();
     if (!id) return <span className="text-muted-foreground">-</span>;
 
-    const handleCopy = async (e: React.MouseEvent) => {
+    const handleCopy = (e: React.MouseEvent) => {
         e.stopPropagation();
-        await navigator.clipboard.writeText(id);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        void copy(id);
     };
 
     return (
@@ -194,6 +217,7 @@ function StatusIcon({ status }: { status: string }) {
 function LogDetailRow({ log, colSpan }: { log: AuditLogRecord; colSpan: number }) {
     const metadata = useMemo(() => parseMetadata(log.metadata), [log.metadata]);
     const changes = useMemo(() => parseMetadata(log.changes), [log.changes]);
+    const beforeAfter = useMemo(() => (changes ? changesAsBeforeAfter(changes) : null), [changes]);
 
     return (
         <TableRow className="border-border/60 bg-muted/40 hover:bg-muted/40">
@@ -233,17 +257,31 @@ function LogDetailRow({ log, colSpan }: { log: AuditLogRecord; colSpan: number }
                         {metadata && Object.keys(metadata).length > 0 && (
                             <>
                                 <p className={MICRO_LABEL_CLASS}>Metadata</p>
-                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background p-2 text-xs ring-1 ring-border">
-                                    {JSON.stringify(metadata, null, 2)}
-                                </pre>
+                                <JsonEditor
+                                    readOnly
+                                    value={metadata as JsonValue}
+                                    collapseAtDepth={2}
+                                    className="max-h-60 overflow-auto"
+                                />
                             </>
                         )}
                         {changes && Object.keys(changes).length > 0 && (
                             <>
                                 <p className={`mt-2 ${MICRO_LABEL_CLASS}`}>Changes</p>
-                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background p-2 text-xs ring-1 ring-border">
-                                    {JSON.stringify(changes, null, 2)}
-                                </pre>
+                                {beforeAfter ? (
+                                    <DiffView
+                                        before={beforeAfter.before}
+                                        after={beforeAfter.after}
+                                        className="rounded-lg bg-background p-2 ring-1 ring-border"
+                                    />
+                                ) : (
+                                    <JsonEditor
+                                        readOnly
+                                        value={changes as JsonValue}
+                                        collapseAtDepth={2}
+                                        className="max-h-60 overflow-auto"
+                                    />
+                                )}
                             </>
                         )}
                     </div>

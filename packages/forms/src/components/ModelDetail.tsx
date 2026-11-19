@@ -4,6 +4,7 @@
 // Auto-generated detail view from model metadata
 // ============================================================
 
+import { JsonEditor, type JsonValue } from '@ottabase/ui/json-editor';
 import { formatDateForUser } from '@ottabase/utils/timezone';
 import { clsx } from 'clsx';
 import { ArrowLeft, Check, Edit2, ExternalLink, Trash2, X } from 'lucide-react';
@@ -271,9 +272,12 @@ function DetailValue({ value, field }: DetailValueProps) {
 
         case 'json':
             return (
-                <pre className="max-h-48 overflow-x-auto rounded-lg bg-muted/40 p-3 text-sm">
-                    <code className="text-foreground">{JSON.stringify(value, null, 2)}</code>
-                </pre>
+                <JsonEditor
+                    readOnly
+                    value={value as JsonValue}
+                    collapseAtDepth={2}
+                    className="max-h-72 overflow-auto"
+                />
             );
 
         case 'array':
