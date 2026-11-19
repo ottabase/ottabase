@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Input, Label, Alert, AlertDescription, Spinner } from '@ottabase/ui';
+import { Button, Input, Label, Alert, AlertDescription, Spinner, PasswordInput } from '@ottabase/ui';
 import { CheckCircle2 } from 'lucide-react';
 
 export interface RegisterFormData {
@@ -172,9 +172,8 @@ export function RegisterForm({
 
             <div className="space-y-2">
                 <Label htmlFor="password">{passwordLabel}</Label>
-                <Input
+                <PasswordInput
                     id="password"
-                    type="password"
                     value={formData.password}
                     onChange={(e) => handleChange('password', e.target.value)}
                     disabled={isLoading}
@@ -189,9 +188,8 @@ export function RegisterForm({
 
             <div className="space-y-2">
                 <Label htmlFor="confirmPassword">{confirmPasswordLabel}</Label>
-                <Input
+                <PasswordInput
                     id="confirmPassword"
-                    type="password"
                     value={formData.confirmPassword}
                     onChange={(e) => handleChange('confirmPassword', e.target.value)}
                     disabled={isLoading}

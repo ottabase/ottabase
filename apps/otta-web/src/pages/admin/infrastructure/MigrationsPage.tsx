@@ -1,5 +1,5 @@
 import { useApiQuery } from '@ottabase/ottaorm/client';
-import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Input, Label } from '@ottabase/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, Checkbox, Label, PasswordInput } from '@ottabase/ui';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -196,8 +196,8 @@ export function MigrationStatusPage() {
 
                 <div className="max-w-xl space-y-3">
                     <div className="flex items-center gap-2">
-                        <Input
-                            type="password"
+                        <PasswordInput
+                            aria-label="Migration secret"
                             placeholder="Migration Secret (required for production)"
                             value={secretInput}
                             onChange={(e) => setSecretInput(e.target.value)}

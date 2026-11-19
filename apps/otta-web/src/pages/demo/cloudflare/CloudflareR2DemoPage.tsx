@@ -1,4 +1,4 @@
-import { Button, Card, CardContent, CardHeader, CardTitle, ConfirmDialog, Input } from '@ottabase/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, ConfirmDialog, FileInput, Input } from '@ottabase/ui';
 import { useEffect, useState } from 'react';
 import { DemoPageHeader } from '../DemoPageHeader';
 
@@ -70,9 +70,6 @@ export function CloudflareR2DemoPage() {
             setSuccess('File uploaded successfully!');
             setFile(null);
             setKey('');
-
-            const fileInput = document.getElementById('r2-file-input') as HTMLInputElement | null;
-            if (fileInput) fileInput.value = '';
 
             await loadObjects();
         } catch (err) {
@@ -178,12 +175,14 @@ export function CloudflareR2DemoPage() {
                 <CardContent>
                     <form onSubmit={handleUpload} className="space-y-4">
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">File</label>
-                            <Input
+                            <label htmlFor="r2-file-input" className="text-sm font-medium">
+                                File
+                            </label>
+                            {/* Keyed on the success message so a finished upload resets the picker */}
+                            <FileInput
+                                key={success ?? 'r2-file'}
                                 id="r2-file-input"
-                                type="file"
-                                onChange={(e) => {
-                                    const selectedFile = e.target.files?.[0];
+                                onChange={([selectedFile]) => {
                                     if (selectedFile) {
                                         setFile(selectedFile);
                                         if (!key) setKey(`demo/${selectedFile.name}`);

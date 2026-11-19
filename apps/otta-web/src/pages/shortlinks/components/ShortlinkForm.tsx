@@ -2,7 +2,17 @@ import { api, isApiError } from '@/lib/api';
 import { APP_ID } from '@/ottabase/config';
 import type { ShortlinkRecord } from '@ottabase/shortlinks';
 import { ShortlinkTypes } from '@ottabase/shortlinks';
-import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ottabase/ui';
+import {
+    Button,
+    Input,
+    Label,
+    NumberInput,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@ottabase/ui';
 import { useEffect, useState } from 'react';
 
 interface ShortlinkFormProps {
@@ -206,17 +216,18 @@ export function ShortlinkForm({ shortlink, onSuccess, onCancel }: ShortlinkFormP
 
             <div className="space-y-2">
                 <Label htmlFor="interstitialSeconds">Countdown Seconds</Label>
-                <Input
+                <NumberInput
                     id="interstitialSeconds"
-                    type="number"
                     min={1}
                     max={60}
                     step={1}
+                    decimalScale={0}
+                    suffix="s"
                     value={formData.interstitialSeconds}
-                    onChange={(e) =>
+                    onChange={(value) =>
                         setFormData({
                             ...formData,
-                            interstitialSeconds: Number(e.target.value),
+                            interstitialSeconds: value ?? 0,
                         })
                     }
                     disabled={loading || !formData.interstitialEnabled}

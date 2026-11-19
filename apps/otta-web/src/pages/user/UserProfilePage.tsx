@@ -25,11 +25,13 @@ import {
     CardHeader,
     CardTitle,
     ConfirmDialog,
+    CopyButton,
     Dialog,
     DialogContent,
     DialogTitle,
     Input,
     Label,
+    PasswordInput,
     Separator,
 } from '@ottabase/ui';
 import { invalidateAuthSession } from '@ottabase/auth/react';
@@ -636,16 +638,9 @@ export function UserProfilePage() {
                             <code className="flex-1 rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-border">
                                 {user.id}
                             </code>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(user.id);
-                                    toast.success('Copied', 'User ID copied to clipboard');
-                                }}
-                            >
+                            <CopyButton value={user.id} label="user ID" notify variant="outline">
                                 Copy
-                            </Button>
+                            </CopyButton>
                         </div>
                     </div>
 
@@ -813,9 +808,8 @@ export function UserProfilePage() {
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <Label htmlFor="currentPassword">Current Password</Label>
-                            <Input
+                            <PasswordInput
                                 id="currentPassword"
-                                type="password"
                                 autoComplete="current-password"
                                 value={passwordForm.currentPassword}
                                 onChange={(e) =>
@@ -827,9 +821,8 @@ export function UserProfilePage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="newPassword">New Password</Label>
-                            <Input
+                            <PasswordInput
                                 id="newPassword"
-                                type="password"
                                 autoComplete="new-password"
                                 value={passwordForm.newPassword}
                                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
@@ -839,9 +832,8 @@ export function UserProfilePage() {
 
                         <div className="space-y-2">
                             <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                            <Input
+                            <PasswordInput
                                 id="confirmPassword"
-                                type="password"
                                 autoComplete="new-password"
                                 value={passwordForm.confirmPassword}
                                 onChange={(e) =>

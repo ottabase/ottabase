@@ -38,6 +38,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
     Input,
+    PasswordInput,
     Skeleton,
     Textarea,
 } from '@ottabase/ui';
@@ -682,8 +683,8 @@ export function BlogDetailPage() {
                         <p className="text-sm text-muted-foreground mb-4">Hint: {displayPost.passwordHint}</p>
                     )}
                     <form onSubmit={handleUnlock} className="w-full max-w-sm space-y-4">
-                        <Input
-                            type="password"
+                        <PasswordInput
+                            aria-label="Post password"
                             placeholder="Enter password"
                             value={password}
                             onChange={(e) => {

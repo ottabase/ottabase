@@ -9,6 +9,7 @@ import {
     Input,
     NativeSelect,
     NativeSelectOption,
+    NumberInput,
     Textarea,
 } from '@ottabase/ui';
 import { useEffect, useState } from 'react';
@@ -217,10 +218,12 @@ await dispatch(env.OBCF_QUEUE, "send-email", {
 
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Delay (seconds)</label>
-                                <Input
-                                    type="number"
+                                <NumberInput
+                                    aria-label="Delay in seconds"
                                     value={delay}
-                                    onChange={(e) => setDelay(parseInt(e.target.value) || 0)}
+                                    onChange={(value) => setDelay(value ?? 0)}
+                                    decimalScale={0}
+                                    suffix="s"
                                     min={0}
                                     max={43200}
                                     disabled={loading}
@@ -244,10 +247,11 @@ await dispatch(env.OBCF_QUEUE, "send-email", {
                     <CardContent className="space-y-4">
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Number of Jobs</label>
-                            <Input
-                                type="number"
+                            <NumberInput
+                                aria-label="Number of jobs"
                                 value={batchCount}
-                                onChange={(e) => setBatchCount(parseInt(e.target.value) || 1)}
+                                onChange={(value) => setBatchCount(value || 1)}
+                                decimalScale={0}
                                 min={1}
                                 max={100}
                                 disabled={loading}

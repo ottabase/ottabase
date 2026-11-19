@@ -10,6 +10,7 @@ import {
     Button,
     ConfirmDialog,
     Input,
+    NumberInput,
     Label,
     Sheet,
     SheetContent,
@@ -284,10 +285,11 @@ export function AdminBlogSeriesPage() {
                         </div>
                         <div className="space-y-2">
                             <Label>Sort Order</Label>
-                            <Input
-                                type="number"
+                            <NumberInput
+                                aria-label="Sort order"
                                 value={formSortOrder}
-                                onChange={(e) => setFormSortOrder(parseInt(e.target.value, 10) || 0)}
+                                onChange={(value) => setFormSortOrder(value ?? 0)}
+                                decimalScale={0}
                                 placeholder="0"
                             />
                         </div>

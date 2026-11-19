@@ -28,6 +28,7 @@ import {
     DialogHeader,
     DialogTitle,
     Input,
+    NumberInput,
     Label,
     Select,
     SelectContent,
@@ -489,13 +490,10 @@ export function AdminBlogSettingsPage() {
                             </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="config-priority">Priority</Label>
-                                <Input
+                                <NumberInput
                                     id="config-priority"
-                                    type="number"
                                     value={configForm.priority}
-                                    onChange={(e) =>
-                                        setConfigForm((f) => ({ ...f, priority: Number(e.target.value) || 10 }))
-                                    }
+                                    onChange={(value) => setConfigForm((f) => ({ ...f, priority: value || 10 }))}
                                 />
                             </div>
                         </div>

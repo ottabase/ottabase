@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Input, Label, Alert, AlertDescription, Spinner, Checkbox } from '@ottabase/ui';
+import { Button, Input, Label, Alert, AlertDescription, Spinner, Checkbox, PasswordInput } from '@ottabase/ui';
 
 export interface CredentialsFormProps {
     onSubmit: (credentials: { email: string; password: string; rememberMe: boolean }) => Promise<void>;
@@ -79,9 +79,8 @@ export function CredentialsForm({
                         </Button>
                     )}
                 </div>
-                <Input
+                <PasswordInput
                     id="password"
-                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={isLoading}

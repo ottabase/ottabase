@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { APP_META } from '@/ottabase/config';
 import { resetPassword } from '@/lib/auth-api';
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from '@ottabase/ui';
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Label, PasswordInput } from '@ottabase/ui';
 
 export function ResetPasswordPage() {
     const navigate = useNavigate();
@@ -83,9 +83,8 @@ export function ResetPasswordPage() {
                             <form onSubmit={handleSubmit} className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="password">New Password</Label>
-                                    <Input
+                                    <PasswordInput
                                         id="password"
-                                        type="password"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         autoComplete="new-password"
@@ -93,9 +92,8 @@ export function ResetPasswordPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="confirm">Confirm Password</Label>
-                                    <Input
+                                    <PasswordInput
                                         id="confirm"
-                                        type="password"
                                         value={confirmPassword}
                                         onChange={(e) => setConfirmPassword(e.target.value)}
                                         autoComplete="new-password"

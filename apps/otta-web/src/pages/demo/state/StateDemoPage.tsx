@@ -15,7 +15,7 @@ import {
     zoomAtom,
     type AppUser,
 } from '@/ottabase/state/appState';
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ottabase/ui';
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Slider } from '@ottabase/ui';
 import { useAtom, useAtomValue } from 'jotai';
 import { useTheme as useNextTheme } from 'next-themes';
 import { DemoPageHeader } from '../DemoPageHeader';
@@ -217,18 +217,13 @@ export function StateDemoPage() {
                             </span>
                         </div>
                         <div className="flex items-center gap-4">
-                            <input
-                                type="range"
-                                min="50"
-                                max="350"
-                                step="10"
-                                value={sidebarState.width}
-                                onChange={(e) =>
-                                    setSidebarState({
-                                        ...sidebarState,
-                                        width: parseInt(e.target.value),
-                                    })
-                                }
+                            <Slider
+                                aria-label="Sidebar width"
+                                min={50}
+                                max={350}
+                                step={10}
+                                value={[sidebarState.width]}
+                                onValueChange={([width]) => setSidebarState({ ...sidebarState, width })}
                                 className="w-full max-w-xs"
                             />
                             <div className="flex gap-2">
@@ -294,13 +289,13 @@ export function StateDemoPage() {
                             </span>
                         </div>
                         <div className="flex items-center gap-4">
-                            <input
-                                type="range"
-                                min="0.5"
-                                max="2"
-                                step="0.1"
-                                value={scale}
-                                onChange={(e) => setScale(parseFloat(e.target.value))}
+                            <Slider
+                                aria-label="Scale"
+                                min={0.5}
+                                max={2}
+                                step={0.1}
+                                value={[scale]}
+                                onValueChange={([next]) => setScale(next)}
                                 className="w-full max-w-xs"
                             />
                             <div className="flex gap-2">

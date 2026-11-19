@@ -1,6 +1,16 @@
 import { slugFromName } from '@/lib/slug';
 import type { OrganizationPlan, OrganizationRecord, OrganizationSettings, OrganizationStatus } from '@/types/rbac';
-import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ottabase/ui';
+import {
+    Button,
+    Input,
+    Label,
+    NumberInput,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@ottabase/ui';
 import { useEffect, useState } from 'react';
 
 export interface OrganizationFormProps {
@@ -140,19 +150,19 @@ export function OrganizationForm({ organization, onSubmit, onCancel }: Organizat
                 {/* Max Members (Settings) */}
                 <div className="space-y-2">
                     <Label htmlFor="maxMembers">Max Members</Label>
-                    <Input
+                    <NumberInput
                         id="maxMembers"
-                        type="number"
-                        value={formData.settings?.maxMembers || ''}
-                        onChange={(e) =>
+                        value={formData.settings?.maxMembers ?? null}
+                        onChange={(value) =>
                             setFormData({
                                 ...formData,
-                                settings: { ...formData.settings, maxMembers: parseInt(e.target.value) || undefined },
+                                settings: { ...formData.settings, maxMembers: value || undefined },
                             })
                         }
                         placeholder="50"
                         min={1}
                         max={10000}
+                        decimalScale={0}
                     />
                     <p className="text-sm text-muted-foreground">
                         Maximum number of members (leave empty for unlimited)

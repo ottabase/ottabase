@@ -24,6 +24,7 @@ import {
     DialogTitle,
     DialogTrigger,
     Input,
+    NumberInput,
     Label,
     Select,
     SelectContent,
@@ -837,10 +838,11 @@ function MappingsEditor({
                             ))}
                         </SelectContent>
                     </Select>
-                    <Input
-                        type="number"
+                    <NumberInput
                         value={priority}
-                        onChange={(e) => setPriority(Number(e.target.value) || 0)}
+                        onChange={(value) => setPriority(value ?? 0)}
+                        decimalScale={0}
+                        hideControls
                         placeholder="Priority"
                         aria-label="Priority"
                         title="Priority — higher wins when multiple patterns match"
@@ -1011,11 +1013,14 @@ const MappingRow = memo(function MappingRow({
                     </Select>
                 </td>
                 <td className="px-3 py-2 align-top">
-                    <Input
-                        type="number"
+                    <NumberInput
                         value={mapping.priority ?? 0}
-                        onChange={(e) => onUpdate({ priority: Number(e.target.value) || 0 })}
-                        className="h-8 w-16 text-xs"
+                        onChange={(value) => onUpdate({ priority: value ?? 0 })}
+                        decimalScale={0}
+                        hideControls
+                        aria-label="Priority"
+                        className="h-8 w-16"
+                        inputClassName="text-xs"
                     />
                 </td>
                 <td className="px-3 py-2 align-top">

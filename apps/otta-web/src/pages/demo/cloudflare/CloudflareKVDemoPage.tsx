@@ -1,12 +1,12 @@
 import { api, isApiError } from '@/lib/api';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Textarea } from '@ottabase/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, NumberInput, Textarea } from '@ottabase/ui';
 import { useState } from 'react';
 import { DemoPageHeader } from '../DemoPageHeader';
 
 export function CloudflareKVDemoPage() {
     const [key, setKey] = useState('');
     const [value, setValue] = useState('');
-    const [ttl, setTtl] = useState('');
+    const [ttl, setTtl] = useState<number | null>(null);
     const [result, setResult] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -24,13 +24,13 @@ export function CloudflareKVDemoPage() {
                 body: {
                     key,
                     value,
-                    ttl: ttl ? parseInt(ttl) : undefined,
+                    ttl: ttl ?? undefined,
                 },
             });
 
             setResult('Value set successfully!');
             setValue('');
-            setTtl('');
+            setTtl(null);
         } catch (err) {
             setError(isApiError(err) ? err.message : 'Unknown error');
         } finally {
@@ -128,13 +128,15 @@ export function CloudflareKVDemoPage() {
 
                         <div className="space-y-2">
                             <label className="text-sm font-medium">TTL (seconds, optional)</label>
-                            <Input
-                                type="number"
+                            <NumberInput
+                                aria-label="TTL in seconds"
                                 value={ttl}
-                                onChange={(e) => setTtl(e.target.value)}
+                                onChange={setTtl}
                                 placeholder="3600"
                                 disabled={loading}
                                 min={1}
+                                decimalScale={0}
+                                suffix="s"
                             />
                         </div>
 

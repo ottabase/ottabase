@@ -10,6 +10,7 @@ import {
     Label,
     NativeSelect,
     NativeSelectOption,
+    Slider,
     Switch,
 } from '@ottabase/ui';
 import { IconPlayerPlayFilled } from '@tabler/icons-react';
@@ -366,38 +367,35 @@ export function BrandKitMotionTab({ tokensJson, onTokensChange }: BrandKitMotion
 
                     <div className="space-y-2">
                         <Label className="text-muted-foreground">Fast Duration ({dFast}ms)</Label>
-                        <input
-                            type="range"
-                            min="50"
-                            max="500"
-                            step="10"
-                            value={dFast}
-                            onChange={(e) => handleUpdate(mode, { durationFast: `${e.target.value}ms` })}
-                            className="w-full accent-primary"
+                        <Slider
+                            aria-label="Fast duration"
+                            min={50}
+                            max={500}
+                            step={10}
+                            value={[dFast]}
+                            onValueChange={([ms]) => handleUpdate(mode, { durationFast: `${ms}ms` })}
                         />
                     </div>
                     <div className="space-y-2">
                         <Label className="text-muted-foreground">Normal Duration ({dNormal}ms)</Label>
-                        <input
-                            type="range"
-                            min="100"
-                            max="1000"
-                            step="10"
-                            value={dNormal}
-                            onChange={(e) => handleUpdate(mode, { durationNormal: `${e.target.value}ms` })}
-                            className="w-full accent-primary"
+                        <Slider
+                            aria-label="Normal duration"
+                            min={100}
+                            max={1000}
+                            step={10}
+                            value={[dNormal]}
+                            onValueChange={([ms]) => handleUpdate(mode, { durationNormal: `${ms}ms` })}
                         />
                     </div>
                     <div className="space-y-2">
                         <Label className="text-muted-foreground">Slow Duration ({dSlow}ms)</Label>
-                        <input
-                            type="range"
-                            min="200"
-                            max="2000"
-                            step="10"
-                            value={dSlow}
-                            onChange={(e) => handleUpdate(mode, { durationSlow: `${e.target.value}ms` })}
-                            className="w-full accent-primary"
+                        <Slider
+                            aria-label="Slow duration"
+                            min={200}
+                            max={2000}
+                            step={10}
+                            value={[dSlow]}
+                            onValueChange={([ms]) => handleUpdate(mode, { durationSlow: `${ms}ms` })}
                         />
                     </div>
                     <div className="space-y-2 pt-2">

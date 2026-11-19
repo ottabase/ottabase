@@ -17,6 +17,7 @@ import {
     CardDescription,
     CardHeader,
     CardTitle,
+    FileInput,
     Input,
     Label,
     Select,
@@ -482,14 +483,12 @@ export function CloudflareAIDemoPage() {
                                             </Button>
                                         </div>
                                     ) : (
-                                        <Input
+                                        <FileInput
                                             id="ai-image"
-                                            type="file"
                                             accept={IMAGE_TYPES.join(',')}
-                                            onChange={(event) => {
-                                                void attachImage(event.target.files?.[0]);
-                                                event.target.value = '';
-                                            }}
+                                            placeholder="Click to choose an image"
+                                            hint=""
+                                            onChange={([file]) => void attachImage(file)}
                                         />
                                     )}
                                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

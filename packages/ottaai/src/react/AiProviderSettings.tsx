@@ -26,6 +26,7 @@ import {
     Input,
     Label,
     NativeSelect,
+    PasswordInput,
     Separator,
 } from '@ottabase/ui';
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2, Plus, ShieldCheck, Trash2 } from 'lucide-react';
@@ -444,9 +445,8 @@ export function AiProviderSettings({
                         {providerEntry?.requiresKey !== false ? (
                             <div className="space-y-2">
                                 <Label htmlFor="ottaai-secret">API key</Label>
-                                <Input
+                                <PasswordInput
                                     id="ottaai-secret"
-                                    type="password"
                                     // WITHOUT THIS, browser password managers offer to save the
                                     // provider key and later autofill it — which both corrupts
                                     // "leave blank to keep" and stores the key somewhere new.

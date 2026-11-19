@@ -13,6 +13,8 @@ import {
     Label,
     NativeSelect,
     NativeSelectOption,
+    NumberInput,
+    Slider,
     Switch,
 } from '@ottabase/ui';
 import { Camera, Download, Loader2 } from 'lucide-react';
@@ -131,14 +133,13 @@ export function CloudflareScreenshotDemoPage() {
                                     <Label htmlFor="shot-quality">Quality</Label>
                                     <span className="text-sm tabular-nums text-muted-foreground">{quality}</span>
                                 </div>
-                                <input
+                                <Slider
                                     id="shot-quality"
-                                    type="range"
+                                    aria-label="Quality"
                                     min={1}
                                     max={100}
-                                    value={quality}
-                                    onChange={(e) => setQuality(Number(e.target.value))}
-                                    className="w-full accent-primary"
+                                    value={[quality]}
+                                    onValueChange={([next]) => setQuality(next)}
                                 />
                                 {format === 'png' ? (
                                     <p className="text-xs text-muted-foreground">
@@ -150,24 +151,24 @@ export function CloudflareScreenshotDemoPage() {
                             <div className="grid grid-cols-3 gap-3">
                                 <div className="space-y-1.5">
                                     <Label htmlFor="shot-width">Width</Label>
-                                    <Input
+                                    <NumberInput
                                         id="shot-width"
-                                        type="number"
                                         min={320}
                                         max={1920}
+                                        decimalScale={0}
                                         value={width}
-                                        onChange={(e) => setWidth(Number(e.target.value))}
+                                        onChange={(value) => setWidth(value ?? 0)}
                                     />
                                 </div>
                                 <div className="space-y-1.5">
                                     <Label htmlFor="shot-height">Height</Label>
-                                    <Input
+                                    <NumberInput
                                         id="shot-height"
-                                        type="number"
                                         min={240}
                                         max={1920}
+                                        decimalScale={0}
                                         value={height}
-                                        onChange={(e) => setHeight(Number(e.target.value))}
+                                        onChange={(value) => setHeight(value ?? 0)}
                                     />
                                 </div>
                                 <div className="space-y-1.5">
