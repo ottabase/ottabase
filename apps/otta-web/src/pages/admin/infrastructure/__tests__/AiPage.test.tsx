@@ -125,6 +125,7 @@ vi.mock('@ottabase/ui', () => ({
     CardDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
     CardHeader: ({ children }: { children: ReactNode }) => <header>{children}</header>,
     CardTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+    useClipboard: () => ({ copy: async () => true, copied: false }),
 }));
 
 import { AdminAiPage } from '../AiPage';

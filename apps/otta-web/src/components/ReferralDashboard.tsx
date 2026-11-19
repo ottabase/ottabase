@@ -21,9 +21,10 @@ import {
     CardHeader,
     CardTitle,
     ConfirmDialog,
+    CopyButton,
     Input,
 } from '@ottabase/ui';
-import { Copy, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -156,14 +157,6 @@ export function ReferralDashboard({ userId }: ReferralDashboardProps) {
         }
     };
 
-    const handleCopyLink = () => {
-        if (!data?.user.referralUsername) return;
-
-        const link = buildReferralLink(data.user.referralUsername);
-        navigator.clipboard.writeText(link);
-        toast.success('Referral link copied to clipboard!');
-    };
-
     const handleClearStoredReferral = () => {
         clearStoredReferralCode();
         window.location.reload();
@@ -279,10 +272,9 @@ export function ReferralDashboard({ userId }: ReferralDashboardProps) {
                     <CardContent>
                         <div className="flex gap-2">
                             <Input type="text" value={referralLink} readOnly />
-                            <Button onClick={handleCopyLink} variant="secondary">
-                                <Copy className="h-4 w-4 mr-2" />
+                            <CopyButton value={referralLink} label="referral link" notify variant="secondary">
                                 Copy
-                            </Button>
+                            </CopyButton>
                         </div>
                     </CardContent>
                 </Card>

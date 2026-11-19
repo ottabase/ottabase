@@ -27,6 +27,7 @@
         "lint": "eslint src"
     },
     "dependencies": {
+        "@ottabase/ui": "workspace:*",
         "@ottabase/utils": "workspace:*",
         "highlight.js": "catalog:"
     },

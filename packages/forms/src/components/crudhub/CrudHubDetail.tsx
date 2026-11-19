@@ -4,7 +4,7 @@
 
 import type { CrudHubModelDescriptor, CrudHubRelation } from '@ottabase/ottaorm';
 import { getStableQuerySignal } from '@ottabase/ottaorm/client';
-import { ConfirmDialog, toast } from '@ottabase/ui';
+import { ConfirmDialog, toast, useClipboard } from '@ottabase/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { Copy, Edit2, Play, Trash2 } from 'lucide-react';
@@ -63,6 +63,7 @@ export function CrudHubDetail({
     const apiPath = `${apiBasePath}/${encodeURIComponent(model.entity)}/${encodeURIComponent(id)}`;
     const can = crudHubAbilities(model, canWrite);
     const [confirm, setConfirm] = useState<'delete' | string | null>(null);
+    const clipboard = useClipboard();
 
     const record = useQuery<Record<string, unknown>>({
         queryKey: ['crudhub', model.entity, 'detail', id],
@@ -124,12 +125,8 @@ export function CrudHubDetail({
         ...Object.keys(row).filter((k) => !(k in model.fields) && !k.startsWith('__')),
     ];
     const copyId = async () => {
-        try {
-            await navigator.clipboard.writeText(`${model.entity}:${id}`);
-            toast.success(`Copied ${model.entity}:${id}`);
-        } catch {
-            toast.error('Clipboard is not available');
-        }
+        if (await clipboard.copy(`${model.entity}:${id}`)) toast.success(`Copied ${model.entity}:${id}`);
+        else toast.error('Clipboard is not available');
     };
 
     return (

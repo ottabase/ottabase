@@ -9,7 +9,7 @@
 
 import type { CrudHubModelDescriptor } from '@ottabase/ottaorm';
 import { getStableQuerySignal } from '@ottabase/ottaorm/client';
-import { ConfirmDialog, toast } from '@ottabase/ui';
+import { ConfirmDialog, toast, useClipboard } from '@ottabase/ui';
 import type {
     DataTableAction,
     DataTableBulkAction,
@@ -151,6 +151,7 @@ export function CrudHubList({
     }, [searchInput, state.search, onStateChange]);
 
     const { flashIds, flash } = useRowFlash();
+    const { copy } = useClipboard();
     const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
     const [actionTarget, setActionTarget] = useState<{ key: string; rows: Row[] } | null>(null);
 
@@ -214,15 +215,14 @@ export function CrudHubList({
     const copyId = useCallback(
         async (row: Row) => {
             const id = String(row[pk]);
-            try {
-                await navigator.clipboard.writeText(`${model.entity}:${id}`);
+            if (await copy(`${model.entity}:${id}`)) {
                 toast.success(`Copied ${model.entity}:${id}`);
                 flash(id);
-            } catch {
+            } else {
                 toast.error('Clipboard is not available');
             }
         },
-        [model.entity, pk, flash],
+        [model.entity, pk, flash, copy],
     );
 
     const viewPath = (row: Row) =>

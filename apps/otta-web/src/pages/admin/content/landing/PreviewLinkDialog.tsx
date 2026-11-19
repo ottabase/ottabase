@@ -5,6 +5,7 @@ import { getErrorMessage } from '@/lib/api';
 import type { SiteSettings } from '@ottabase/ottalanding';
 import {
     Button,
+    CopyButton,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -15,7 +16,7 @@ import {
     Label,
 } from '@ottabase/ui';
 import { useMutation } from '@tanstack/react-query';
-import { Copy, Link2 } from 'lucide-react';
+import { Link2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { landingApi, publicUrl } from './landingApi';
@@ -29,16 +30,6 @@ export function PreviewLinkDialog({ site, pageId, path }: { site: SiteSettings; 
         onError: (err) => toast.error(getErrorMessage(err)),
     });
     const link = base && token.data ? `${base}?preview=${token.data.token}` : undefined;
-
-    const copy = async () => {
-        if (!link) return;
-        try {
-            await navigator.clipboard.writeText(link);
-            toast.success('Preview link copied');
-        } catch {
-            toast.error('Couldn’t copy. Select the link and copy it instead.');
-        }
-    };
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -71,9 +62,14 @@ export function PreviewLinkDialog({ site, pageId, path }: { site: SiteSettings; 
                                 value={link ?? 'Creating link…'}
                                 onFocus={(e) => e.currentTarget.select()}
                             />
-                            <Button type="button" onClick={copy} disabled={!link} aria-label="Copy preview link">
-                                <Copy className="h-4 w-4" aria-hidden />
-                            </Button>
+                            <CopyButton
+                                value={link ?? ''}
+                                label="preview link"
+                                notify
+                                disabled={!link}
+                                variant="default"
+                                size="icon"
+                            />
                         </div>
                     </div>
                 ) : (

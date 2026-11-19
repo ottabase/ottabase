@@ -11,6 +11,7 @@ import {
     CardHeader,
     CardTitle,
     ConfirmDialog,
+    CopyButton,
     Dialog,
     DialogContent,
     DialogDescription,
@@ -35,7 +36,6 @@ import {
     ChevronRight,
     ChevronsLeft,
     ChevronsRight,
-    Copy,
     Edit,
     Link2,
     Plus,
@@ -55,7 +55,6 @@ export function ShortlinksPage() {
     const [actionError, setActionError] = useState<string | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [editingShortlink, setEditingShortlink] = useState<ShortlinkRecord | null>(null);
-    const [copiedId, setCopiedId] = useState<string | null>(null);
     const [deleteDialog, setDeleteDialog] = useState<string | null>(null);
 
     // Pagination state
@@ -117,16 +116,6 @@ export function ShortlinksPage() {
         setEditingShortlink(null);
         setActionError(null);
         await queryClient.invalidateQueries({ queryKey: ['shortlinks'] });
-    };
-
-    const copyToClipboard = async (text: string, id: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopiedId(id);
-            setTimeout(() => setCopiedId(null), 2000);
-        } catch (err) {
-            console.error('Failed to copy:', err);
-        }
     };
 
     const getShortUrl = (link: ShortlinkRow) => link.shortUrl ?? `${window.location.origin}/s/${link.shortCode}`;
@@ -323,21 +312,11 @@ export function ShortlinksPage() {
                                                 <TableCell className="font-mono">
                                                     <div className="flex items-center gap-1">
                                                         <span className="font-medium">{link.shortCode}</span>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-6 w-6 p-0"
-                                                            title="Copy Short Code"
-                                                            onClick={() =>
-                                                                copyToClipboard(link.shortCode, `${link.id}-code`)
-                                                            }
-                                                        >
-                                                            {copiedId === `${link.id}-code` ? (
-                                                                <span className="text-xs text-success">✓</span>
-                                                            ) : (
-                                                                <Copy className="h-3 w-3" />
-                                                            )}
-                                                        </Button>
+                                                        <CopyButton
+                                                            value={link.shortCode}
+                                                            label="short code"
+                                                            className="h-6 w-6"
+                                                        />
                                                     </div>
                                                 </TableCell>
 
@@ -353,21 +332,11 @@ export function ShortlinksPage() {
                                                         >
                                                             {link.fullUrl}
                                                         </a>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-6 w-6 p-0 flex-shrink-0"
-                                                            title="Copy Destination URL"
-                                                            onClick={() =>
-                                                                copyToClipboard(link.fullUrl, `${link.id}-dest`)
-                                                            }
-                                                        >
-                                                            {copiedId === `${link.id}-dest` ? (
-                                                                <span className="text-xs text-success">✓</span>
-                                                            ) : (
-                                                                <Copy className="h-3 w-3" />
-                                                            )}
-                                                        </Button>
+                                                        <CopyButton
+                                                            value={link.fullUrl}
+                                                            label="destination URL"
+                                                            className="h-6 w-6 shrink-0"
+                                                        />
                                                     </div>
                                                 </TableCell>
 
@@ -383,21 +352,11 @@ export function ShortlinksPage() {
                                                         >
                                                             {getShortUrl(link)}
                                                         </a>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            className="h-6 w-6 p-0 flex-shrink-0"
-                                                            title="Copy Redirect URL"
-                                                            onClick={() =>
-                                                                copyToClipboard(getShortUrl(link), `${link.id}-link`)
-                                                            }
-                                                        >
-                                                            {copiedId === `${link.id}-link` ? (
-                                                                <span className="text-xs text-success">✓</span>
-                                                            ) : (
-                                                                <Copy className="h-3 w-3" />
-                                                            )}
-                                                        </Button>
+                                                        <CopyButton
+                                                            value={getShortUrl(link)}
+                                                            label="redirect URL"
+                                                            className="h-6 w-6 shrink-0"
+                                                        />
                                                     </div>
                                                 </TableCell>
 

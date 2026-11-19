@@ -11,6 +11,7 @@ import {
     CardHeader,
     CardTitle,
     Checkbox,
+    CopyButton,
     Input,
     Label,
     NativeSelect,
@@ -19,7 +20,7 @@ import {
     Tag,
 } from '@ottabase/ui';
 import { Link } from '@tanstack/react-router';
-import { Check, Copy, KeyRound } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { useState } from 'react';
 import { DemoPageHeader } from '../DemoPageHeader';
 
@@ -57,7 +58,6 @@ export function ApiKeysDemoPage() {
     const [scopes, setScopes] = useState<string[]>(['read']);
     const [expiresInDays, setExpiresInDays] = useState('30');
     const [issued, setIssued] = useState<string | null>(null);
-    const [copied, setCopied] = useState(false);
 
     const keys = useApiQuery<{ data: ApiKeyView[] }>({
         queryKey: KEYS_QUERY,
@@ -69,10 +69,7 @@ export function ApiKeysDemoPage() {
         endpoint: '/api/keys',
         invalidateKeys: [KEYS_QUERY],
         mutationOptions: {
-            onSuccess: (response) => {
-                setIssued(response.data.key);
-                setCopied(false);
-            },
+            onSuccess: (response) => setIssued(response.data.key),
         },
     });
 
@@ -86,12 +83,6 @@ export function ApiKeysDemoPage() {
         event.preventDefault();
         const days = Number(expiresInDays);
         create.mutate({ name: name.trim(), scopes, expiresAt: days ? Date.now() + days * DAY : null });
-    };
-
-    const copy = async () => {
-        if (!issued) return;
-        await navigator.clipboard.writeText(issued);
-        setCopied(true);
     };
 
     const toggleScope = (scope: string, on: boolean) =>
@@ -207,10 +198,9 @@ export function ApiKeysDemoPage() {
                                     <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs">
                                         {issued}
                                     </code>
-                                    <Button variant="outline" size="sm" onClick={copy}>
-                                        {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                                        {copied ? 'Copied' : 'Copy'}
-                                    </Button>
+                                    <CopyButton value={issued} label="API key" variant="outline">
+                                        Copy
+                                    </CopyButton>
                                 </CardContent>
                             </Card>
                         ) : null}

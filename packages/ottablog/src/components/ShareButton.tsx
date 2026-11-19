@@ -11,9 +11,10 @@ import {
     DropdownMenuItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
+    useClipboard,
 } from '@ottabase/ui';
 import { Check, Copy, ExternalLink, Mail, Share2 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 
 export interface ShareButtonProps {
     /** Full URL to share */
@@ -42,24 +43,9 @@ const SOCIAL_LINKS = [
 ] as const;
 
 export function ShareButton({ url, title, description }: ShareButtonProps) {
-    const [copied, setCopied] = useState(false);
+    // A denied or missing clipboard is silent: the item just stays "Copy link"
+    const { copy, copied } = useClipboard({ timeout: 2000 });
     const supportsNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
-
-    const handleCopy = useCallback(() => {
-        try {
-            navigator.clipboard.writeText(url).then(
-                () => {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
-                },
-                () => {
-                    /* clipboard denied — silent, button stays unchanged */
-                },
-            );
-        } catch {
-            /* clipboard API unavailable (HTTP, older browser) */
-        }
-    }, [url]);
 
     const handleNativeShare = useCallback(() => {
         navigator.share({ url, title, text: description || title }).catch(() => {
@@ -97,7 +83,7 @@ export function ShareButton({ url, title, description }: ShareButtonProps) {
                     </>
                 )}
 
-                <DropdownMenuItem onClick={handleCopy}>
+                <DropdownMenuItem onClick={() => void copy(url)}>
                     {copied ? <Check className="mr-2 h-4 w-4 text-green-600" /> : <Copy className="mr-2 h-4 w-4" />}
                     {copied ? 'Copied!' : 'Copy link'}
                 </DropdownMenuItem>

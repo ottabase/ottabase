@@ -2982,6 +2982,9 @@ importers:
 
   packages/ui-code-highlight:
     dependencies:
+      '@ottabase/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@ottabase/utils':
         specifier: workspace:*
         version: link:../utils

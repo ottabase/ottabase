@@ -1,4 +1,5 @@
 'use client';
+import { useClipboard } from '@ottabase/ui';
 import { sanitizeBlockHtml } from '@ottabase/utils/sanitize';
 import hljs from 'highlight.js/lib/core';
 import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react';
@@ -109,7 +110,7 @@ function CodeBlockInner({
     collapsibleThreshold = 20,
     className = '',
 }: CodeBlockProps) {
-    const [copied, setCopied] = useState(false);
+    const { copy, copied } = useClipboard({ timeout: 2000 });
     const [expanded, setExpanded] = useState(true);
 
     // lineNumberStart: default 1 if not set, or if 0 / alphabets / invalid
@@ -131,16 +132,6 @@ function CodeBlockInner({
     // Split highlighted HTML by lines so we can render line numbers inline (scroll together)
     const lineHtmls = useMemo(() => highlightedHtml.split('\n'), [highlightedHtml]);
 
-    const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(code);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-            console.error('Failed to copy code:', err);
-        }
-    };
-
     const preStyle: React.CSSProperties = useMemo(() => {
         const s: React.CSSProperties = {};
         if (wrapLongLines) s.whiteSpace = 'pre-wrap';
@@ -161,7 +152,8 @@ function CodeBlockInner({
                     </div>
                     {!hideCopyButton && (
                         <button
-                            onClick={handleCopy}
+                            type="button"
+                            onClick={() => void copy(code)}
                             className="code-block-copy-btn flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors hover:bg-muted"
                             title="Copy code"
                         >

@@ -10,11 +10,11 @@
  */
 
 import { useApiQuery } from '@ottabase/ottaorm/client';
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ottabase/ui';
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, useClipboard } from '@ottabase/ui';
 import { sanitizeUrl } from '@ottabase/utils/sanitize';
 import { Link } from '@tanstack/react-router';
 import { AlertTriangle, CheckCircle2, Copy, ExternalLink, KeyRound, Server, Sparkles, Waypoints } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { AiConfigSnapshot } from '@/ottabase/ai-config-types';
 
 const QUIET_CARD = '';
@@ -48,7 +48,7 @@ function presentLabel(present: boolean) {
 }
 
 export function AdminAiPage() {
-    const [copied, setCopied] = useState(false);
+    const { copy, copied } = useClipboard();
     const query = useApiQuery<AiConfigSnapshot>({
         entity: 'ai-config',
         queryKey: ['admin', 'snapshot'],
@@ -56,17 +56,6 @@ export function AdminAiPage() {
     });
 
     const data = query.data;
-    const copySnapshot = async () => {
-        if (!data) return;
-        try {
-            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-        } catch {
-            setCopied(false);
-        }
-    };
-
     return (
         <div className="space-y-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -91,7 +80,7 @@ export function AdminAiPage() {
                         variant="outline"
                         size="sm"
                         className="gap-2"
-                        onClick={() => void copySnapshot()}
+                        onClick={() => data && void copy(JSON.stringify(data, null, 2))}
                         disabled={!data}
                     >
                         <Copy className="h-3.5 w-3.5" />

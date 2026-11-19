@@ -11,9 +11,9 @@
  */
 import type { DeploymentVersion, ReadinessReport } from '@ottabase/kernel';
 import { useApiQuery } from '@ottabase/ottaorm/client';
-import { Button, EnvName, Input, PageHeader, StatusChip, toast } from '@ottabase/ui';
+import { CopyButton, EnvName, Input, PageHeader, StatusChip } from '@ottabase/ui';
 import { Link } from '@tanstack/react-router';
-import { AlertTriangle, ArrowRight, Check, Copy, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 interface ReadinessResponse extends ReadinessReport {
@@ -187,15 +187,6 @@ function ReadinessDetails() {
 
     const missing = data.settings.filter((s) => s.required && !s.set);
     const failed = data.checks.filter((c) => !c.ok);
-    const copy = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            toast.success('Command copied');
-        } catch {
-            toast.error('Clipboard is not available');
-        }
-    };
-
     return (
         <section className="rounded-xl border border-border/60 bg-card">
             {/* Summary line */}
@@ -307,7 +298,7 @@ function ReadinessDetails() {
                         </thead>
                         <tbody className="divide-y divide-border/60">
                             {groups.map((group) => (
-                                <GroupRows key={group.pkg} group={group} onCopy={copy} />
+                                <GroupRows key={group.pkg} group={group} />
                             ))}
                             {groups.length === 0 && (
                                 <tr>
@@ -326,7 +317,6 @@ function ReadinessDetails() {
 
 function GroupRows({
     group,
-    onCopy,
 }: {
     group: {
         pkg: string;
@@ -334,7 +324,6 @@ function GroupRows({
         settings: ReadinessReport['settings'];
         checks: ReadinessReport['checks'];
     };
-    onCopy: (text: string) => void;
 }) {
     return (
         <>
@@ -370,14 +359,9 @@ function GroupRows({
                                 <span className="inline-flex items-center gap-2">
                                     <span className="italic text-muted-foreground">Not set</span>
                                     {command && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => onCopy(command)}
-                                            title={command}
-                                        >
-                                            <Copy className="mr-1 h-3.5 w-3.5" /> wrangler
-                                        </Button>
+                                        <CopyButton value={command} label="command" notify title={command}>
+                                            wrangler
+                                        </CopyButton>
                                     )}
                                 </span>
                             ) : s.preview !== undefined ? (
