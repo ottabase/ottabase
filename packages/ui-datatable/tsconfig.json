@@ -11,10 +11,9 @@
         "sourceMap": true,
         "skipLibCheck": true,
         "strict": true,
-        "paths": {
-            "@ottabase/ui": ["../ui/src/index.ts"],
-            "@ottabase/ui/*": ["../ui/src/*"]
-        }
+        // Resolve workspace packages through node_modules (their built types): source paths into
+        // another package's src break `rootDir` (TS6059) and the DTS build.
+        "paths": {}
     },
     "include": ["src/**/*"],
     "exclude": ["dist", "node_modules", "**/*.test.*", "**/*.spec.*"]

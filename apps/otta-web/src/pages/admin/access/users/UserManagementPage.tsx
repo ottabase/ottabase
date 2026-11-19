@@ -18,11 +18,12 @@ import {
     TableHead,
     TableHeader,
     TableRow,
+    useDebouncedCallback,
 } from '@ottabase/ui';
 import type { PaginatedResponse } from '@ottabase/utils/pagination';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, Calendar, ChevronLeft, ChevronRight, Mail, Search, Shield } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 const PER_PAGE = 25;
 
@@ -45,19 +46,11 @@ export function UserManagementPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
     // Debounce search to avoid hammering the API on every keystroke.
-    useEffect(() => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(() => {
-            setDebouncedSearch(searchTerm);
-            setCurrentPage(1); // Reset to first page on new search
-        }, 300);
-        return () => {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-        };
-    }, [searchTerm]);
+    const applySearch = useDebouncedCallback((term: string) => {
+        setDebouncedSearch(term);
+        setCurrentPage(1); // Reset to first page on new search
+    }, 300);
 
     const queryParams = useMemo(() => {
         const params = new URLSearchParams();
@@ -126,7 +119,10 @@ export function UserManagementPage() {
                         <Input
                             placeholder="Search users..."
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onChange={(e) => {
+                                setSearchTerm(e.target.value);
+                                applySearch(e.target.value);
+                            }}
                             className="h-9 pl-10"
                         />
                     </div>

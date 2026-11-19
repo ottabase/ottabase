@@ -35,6 +35,7 @@
         "@tanstack/react-table": "^8.21.3"
     },
     "peerDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@tanstack/react-query": "catalog:",
         "clsx": "catalog:",
         "lucide-react": "catalog:",
@@ -42,6 +43,9 @@
         "react-dom": "catalog:"
     },
     "peerDependenciesMeta": {
+        "@ottabase/ui": {
+            "optional": true
+        },
         "clsx": {
             "optional": true
         },
@@ -50,6 +54,7 @@
         }
     },
     "devDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@tanstack/react-query": "catalog:",
         "@testing-library/jest-dom": "catalog:",
         "@testing-library/react": "catalog:",

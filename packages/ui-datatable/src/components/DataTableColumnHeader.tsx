@@ -5,10 +5,11 @@
 // (choosing the active one clears sorting) and hide column.
 // ============================================================
 
+import { useClickOutside, useHotkeys } from '@ottabase/ui';
 import type { Column } from '@tanstack/react-table';
 import { clsx } from 'clsx';
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, EyeOff } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 interface DataTableColumnHeaderProps<TData, TValue> {
     column: Column<TData, TValue>;
@@ -32,21 +33,10 @@ export function DataTableColumnHeader<TData, TValue>({
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        if (!open) return;
-        const onDown = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setOpen(false);
-        };
-        document.addEventListener('mousedown', onDown);
-        document.addEventListener('keydown', onKey);
-        return () => {
-            document.removeEventListener('mousedown', onDown);
-            document.removeEventListener('keydown', onKey);
-        };
-    }, [open]);
+    // Close on outside click or Escape
+    const close = () => setOpen(false);
+    useClickOutside(ref, close, open);
+    useHotkeys([['escape', close]], { enabled: open, preventDefault: false, ignoreInEditable: false });
 
     if (!canSort && !canHide) {
         return <div className={clsx('flex items-center', headerClassName, className)}>{title}</div>;

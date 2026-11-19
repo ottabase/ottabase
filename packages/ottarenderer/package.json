@@ -41,6 +41,7 @@
     },
     "dependencies": {
         "@ottabase/medialibrary": "workspace:*",
+        "@ottabase/ui": "workspace:*",
         "@ottabase/ui-code-highlight": "workspace:*",
         "@ottabase/utils": "workspace:*"
     },

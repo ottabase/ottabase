@@ -43,10 +43,14 @@
         "@ottabase/utils": "workspace:*"
     },
     "peerDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@tanstack/react-router": "catalog:",
         "react": "catalog:"
     },
     "peerDependenciesMeta": {
+        "@ottabase/ui": {
+            "optional": true
+        },
         "@tanstack/react-router": {
             "optional": true
         },
@@ -55,8 +59,10 @@
         }
     },
     "devDependencies": {
+        "@ottabase/ui": "workspace:*",
         "@types/react": "catalog:",
         "react": "catalog:",
+        "react-dom": "catalog:",
         "rimraf": "catalog:",
         "tsup": "catalog:",
         "typescript": "catalog:"

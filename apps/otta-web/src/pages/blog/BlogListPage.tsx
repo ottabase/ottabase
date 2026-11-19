@@ -31,6 +31,7 @@ import {
     Input,
     NativeSelect,
     NativeSelectOption,
+    useDebouncedCallback,
 } from '@ottabase/ui';
 import { hasGrantedPermission } from '@ottabase/utils/permissions';
 import { Link, useSearch } from '@tanstack/react-router';
@@ -48,7 +49,7 @@ import {
     Tag,
     User,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { partitionBlogTimeline } from './blogTimeline';
 
 interface BlogPostTag {
@@ -134,18 +135,11 @@ export function BlogListPage() {
     const [contentType, setContentType] = useState<ContentType | ''>('');
     const [seriesFilter, setSeriesFilter] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
     // Debounce search input (300ms)
-    useEffect(() => {
-        debounceRef.current = setTimeout(() => {
-            setDebouncedSearch(search);
-            setCurrentPage(1);
-        }, 300);
-        return () => {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-        };
-    }, [search]);
+    const applySearch = useDebouncedCallback((term: string) => {
+        setDebouncedSearch(term);
+        setCurrentPage(1);
+    }, 300);
 
     // Build query params for the public blog API
     const blogListParams = new URLSearchParams();
@@ -235,7 +229,10 @@ export function BlogListPage() {
                     <Input
                         placeholder="Search posts..."
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
+                        onChange={(e) => {
+                            setSearch(e.target.value);
+                            applySearch(e.target.value);
+                        }}
                         className="h-9 pl-10"
                     />
                 </div>

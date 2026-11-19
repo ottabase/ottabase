@@ -4,10 +4,11 @@
 // Column visibility toggle dropdown
 // ============================================================
 
+import { useClickOutside } from '@ottabase/ui';
 import type { Table } from '@tanstack/react-table';
 import { clsx } from 'clsx';
 import { SlidersHorizontal } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 interface DataTableViewOptionsProps<TData> {
     table: Table<TData>;
@@ -22,16 +23,7 @@ export function DataTableViewOptions<TData>({ table }: DataTableViewOptionsProps
     const ref = useRef<HTMLDivElement>(null);
 
     // Close on outside click
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) {
-                setOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open]);
+    useClickOutside(ref, () => setOpen(false), open);
 
     const hideableColumns = table.getAllColumns().filter((column) => column.getCanHide());
 

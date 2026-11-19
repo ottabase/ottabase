@@ -6,7 +6,7 @@ import { buildCSSVarMap, buildPreviewTheme } from '@ottabase/brand-engine';
 import { injectFont } from '@ottabase/brand-engine/dom';
 import { useBrand } from '@ottabase/brand-engine-react';
 import { useApiQuery } from '@ottabase/ottaorm/client';
-import { Button, ConfirmDialog, Tabs, TabsContent, TabsList, TabsTrigger } from '@ottabase/ui';
+import { Button, ConfirmDialog, Tabs, TabsContent, TabsList, TabsTrigger, useHotkeys } from '@ottabase/ui';
 import {
     IconActivity,
     IconArrowLeft,
@@ -24,7 +24,7 @@ import {
 } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { brandKitApi, type BrandKitItem } from './brand/brandApi';
 import { BrandKitAdvancedTab } from './brand/BrandKitAdvancedTab';
@@ -386,19 +386,8 @@ export function AdminBrandKitDetailPage() {
     };
 
     // Cmd/Ctrl+S saves – matches the "editor" mental model of this page.
-    // Ref indirection keeps the listener mounted once while always calling the latest closure.
-    const saveRef = useRef(handleSave);
-    saveRef.current = handleSave;
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-                e.preventDefault();
-                saveRef.current();
-            }
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, []);
+    // useHotkeys always calls the latest handleSave, and mod shortcuts fire from inside fields too.
+    useHotkeys([['mod+s', handleSave]]);
 
     const handleDelete = () => {
         if (deleteMutation.isPending || !kit) return;

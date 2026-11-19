@@ -5,7 +5,8 @@
 // Inspired by Anthropic / GitHub / Notion style mega-menus.
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useClickOutside } from '@ottabase/ui';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { buildItemTree, type MenuItemTreeNode } from '../treeUtils';
 import type { MenuItemDto } from '../types';
 import { MenuItemImage } from './MenuItemImage';
@@ -112,16 +113,7 @@ function MegaMenuTrigger({
     const handleOpen = useCallback(() => onOpen(node.item.id), [onOpen, node.item.id]);
 
     // Close on click outside
-    useEffect(() => {
-        if (!isOpen) return;
-        function handleClick(e: MouseEvent) {
-            if (ref.current && !ref.current.contains(e.target as Node)) {
-                onClose();
-            }
-        }
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
-    }, [isOpen, onClose]);
+    useClickOutside(ref, onClose, isOpen);
 
     const hasChildren = node.children.length > 0;
 

@@ -41,6 +41,7 @@ import {
     TableHeader,
     TableRow,
     Textarea,
+    useDebouncedCallback,
 } from '@ottabase/ui';
 import { Link } from '@tanstack/react-router';
 import {
@@ -115,13 +116,10 @@ export function AdminBlogListPage() {
     });
 
     // Debounce search input to reduce API calls
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setDebouncedSearch(searchInput.trim());
-            setCurrentPage(1); // Reset to page 1 when search changes
-        }, SEARCH_DEBOUNCE_MS);
-        return () => clearTimeout(timer);
-    }, [searchInput]);
+    const applySearch = useDebouncedCallback((term: string) => {
+        setDebouncedSearch(term.trim());
+        setCurrentPage(1); // Reset to page 1 when search changes
+    }, SEARCH_DEBOUNCE_MS);
 
     const queryParams = useMemo(() => {
         const whereClause: Record<string, unknown> = {};
@@ -367,7 +365,10 @@ export function AdminBlogListPage() {
                         <Input
                             placeholder="Search articles, thoughts, and photo journals..."
                             value={searchInput}
-                            onChange={(e) => setSearchInput(e.target.value)}
+                            onChange={(e) => {
+                                setSearchInput(e.target.value);
+                                applySearch(e.target.value);
+                            }}
                             className="h-9 pl-9"
                         />
                         {isLoading && debouncedSearch && (

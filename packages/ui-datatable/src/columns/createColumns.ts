@@ -4,6 +4,7 @@
 // Declarative column creation from simple config objects
 // ============================================================
 
+import { useClickOutside, useHotkeys } from '@ottabase/ui';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import React from 'react';
 import type { DataTableAction, DataTableColumnDef } from '../types';
@@ -229,23 +230,10 @@ function ActionsDropdown<TData>({ actions, data }: { actions: DataTableAction<TD
         });
     }, [open]);
 
-    // Close on outside click
-    React.useEffect(() => {
-        if (!open) return;
-        const handler = (e: MouseEvent) => {
-            const target = e.target as Node;
-            if (
-                triggerRef.current &&
-                !triggerRef.current.contains(target) &&
-                menuRef.current &&
-                !menuRef.current.contains(target)
-            ) {
-                setOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, [open]);
+    // Close on outside click (the trigger toggles on its own) or Escape
+    const close = () => setOpen(false);
+    useClickOutside<HTMLElement>([triggerRef, menuRef], close, open);
+    useHotkeys([['escape', close]], { enabled: open, preventDefault: false, ignoreInEditable: false });
 
     // Close on scroll so the menu doesn't float in the wrong spot
     React.useEffect(() => {
@@ -253,16 +241,6 @@ function ActionsDropdown<TData>({ actions, data }: { actions: DataTableAction<TD
         const handler = () => setOpen(false);
         window.addEventListener('scroll', handler, true);
         return () => window.removeEventListener('scroll', handler, true);
-    }, [open]);
-
-    // Close on Escape key
-    React.useEffect(() => {
-        if (!open) return;
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setOpen(false);
-        };
-        document.addEventListener('keydown', handler);
-        return () => document.removeEventListener('keydown', handler);
     }, [open]);
 
     return React.createElement(

@@ -2,7 +2,8 @@ import { safeImageProps } from '@ottabase/utils/sanitize';
 import type { FileSource } from '@ottabase/utils/media';
 import { IMAGE_SIZES } from '../../media';
 import type { BlockRenderer } from '../../types';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useClickOutside } from '@ottabase/ui';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 export interface HotspotItem {
     id: string;
@@ -87,16 +88,8 @@ const ImageHotspots: BlockRenderer<ImageHotspotsData> = ({ data, className = '' 
         }
     }, []);
 
-    /* Close tooltip on outside click */
-    useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-                setActiveId(null);
-            }
-        };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
+    /* Close tooltip on outside click (listening only while one is open) */
+    useClickOutside(containerRef, () => setActiveId(null), activeId !== null);
 
     /* Container styles for height and cover mode */
     const containerStyle = useMemo((): React.CSSProperties => {

@@ -3,6 +3,7 @@
     "compilerOptions": {
         "outDir": "dist",
         "jsx": "react-jsx",
+        "lib": ["dom", "dom.iterable", "ES2020"],
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,
