@@ -238,27 +238,27 @@ const config = defineModelConfig({
 
 ## Field Types
 
-| Field Type    | Renders As                      |
-| ------------- | ------------------------------- |
-| `input`       | Text input                      |
-| `textarea`    | Multi-line textarea             |
-| `number`      | Number input with min/max/step  |
-| `email`       | Email input                     |
-| `password`    | Password with show/hide + hints |
-| `url`         | URL input                       |
-| `tel`         | Phone input                     |
-| `date`        | Date picker                     |
-| `datetime`    | DateTime picker                 |
-| `time`        | Time picker                     |
-| `boolean`     | Checkbox                        |
-| `select`      | OttaSelect (single)             |
-| `multiselect` | OttaSelect (multiple)           |
-| `file`        | File upload with drag/drop      |
-| `image`       | Image upload with preview       |
-| `json`        | JSON editor (edit + tree view)  |
-| `editor`      | JSON editor (EditorJS format)   |
-| `hidden`      | Hidden input                    |
-| `readonly`    | Read-only display               |
+| Field Type    | Renders As                     |
+| ------------- | ------------------------------ |
+| `input`       | Text input                     |
+| `textarea`    | Multi-line textarea            |
+| `number`      | ui NumberInput (min/max/step)  |
+| `email`       | Email input                    |
+| `password`    | ui PasswordInput (+ checklist) |
+| `url`         | URL input                      |
+| `tel`         | Phone input                    |
+| `date`        | Date picker                    |
+| `datetime`    | DateTime picker                |
+| `time`        | Time picker                    |
+| `boolean`     | Checkbox                       |
+| `select`      | OttaSelect (single)            |
+| `multiselect` | OttaSelect (multiple)          |
+| `file`        | ui FileInput + upload          |
+| `image`       | ui FileInput + upload, preview |
+| `json`        | JSON editor (edit + tree view) |
+| `editor`      | JSON editor (EditorJS format)  |
+| `hidden`      | Hidden input                   |
+| `readonly`    | Read-only display              |
 
 ## Accessibility, SSR & performance
 

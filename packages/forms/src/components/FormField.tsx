@@ -5,11 +5,15 @@
 // ============================================================
 
 import { OttaSelect, type OttaSelectItem } from '@ottabase/ottaselect';
+import { FileInput } from '@ottabase/ui/file-input';
 import { JsonEditor, type JsonValue } from '@ottabase/ui/json-editor';
+import { NumberInput } from '@ottabase/ui/number-input';
+import { PasswordInput, passwordRequirements } from '@ottabase/ui/password-input';
+import { redactErrorForLog } from '@ottabase/utils/http-errors';
 import { sanitizeUrl } from '@ottabase/utils/sanitize';
 import { formatDateForUser } from '@ottabase/utils/timezone';
 import { clsx } from 'clsx';
-import { AlertCircle, Calendar, Check, Eye, EyeOff, Loader2, Upload, X } from 'lucide-react';
+import { AlertCircle, Calendar } from 'lucide-react';
 import React, { useCallback } from 'react';
 import { useFormRequest } from '../hooks/useFormRequest';
 import type { FormFieldProps, ModelFieldDescriptor } from '../types';
@@ -99,18 +103,18 @@ export function FormField({
 
             case 'number':
                 return (
-                    <input
-                        type="number"
+                    <NumberInput
                         id={name}
                         name={name}
-                        value={value !== undefined && value !== null ? String(value) : ''}
-                        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+                        value={toNumberOrNull(value)}
+                        onChange={onChange}
                         placeholder={placeholder}
                         disabled={disabled}
                         min={formConfig.min}
                         max={formConfig.max}
                         step={formConfig.step}
-                        className={baseInputClasses}
+                        decimalScale={field.type === 'integer' ? 0 : undefined}
+                        aria-invalid={error ? true : undefined}
                     />
                 );
 
@@ -130,15 +134,18 @@ export function FormField({
 
             case 'password':
                 return (
-                    <PasswordField
-                        value={value}
-                        onChange={onChange}
+                    <PasswordInput
+                        id={name}
+                        name={name}
+                        value={(value as string) || ''}
+                        onChange={(e) => onChange(e.target.value)}
                         placeholder={placeholder}
                         disabled={disabled}
-                        name={name}
-                        className={baseInputClasses}
-                        showHints={field.formConfig?.showPasswordHints}
-                        minLength={field.formConfig?.min}
+                        autoComplete="new-password"
+                        aria-invalid={error ? true : undefined}
+                        requirements={
+                            formConfig.showPasswordHints ? passwordRequirements(formConfig.min || 8) : undefined
+                        }
                     />
                 );
 
@@ -396,79 +403,6 @@ function JsonField({
     );
 }
 
-function PasswordField({
-    value,
-    onChange,
-    placeholder,
-    disabled,
-    name,
-    className,
-    showHints = false,
-    minLength,
-}: {
-    value: unknown;
-    onChange: (value: unknown) => void;
-    placeholder: string;
-    disabled: boolean;
-    name: string;
-    className: string;
-    showHints?: boolean;
-    minLength?: number;
-}) {
-    const [showPassword, setShowPassword] = React.useState(false);
-    const password = (value as string) || '';
-
-    // Password strength indicators
-    const hasMinLength = password.length >= (minLength || 8);
-    const hasUppercase = /[A-Z]/.test(password);
-    const hasLowercase = /[a-z]/.test(password);
-    const hasNumber = /[0-9]/.test(password);
-    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-
-    return (
-        <div className="space-y-2">
-            <div className="relative">
-                <input
-                    type={showPassword ? 'text' : 'password'}
-                    id={name}
-                    name={name}
-                    value={password}
-                    onChange={(e) => onChange(e.target.value)}
-                    placeholder={placeholder}
-                    disabled={disabled}
-                    className={clsx(className, 'pr-10')}
-                    autoComplete="new-password"
-                />
-                <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors duration-normal hover:text-foreground"
-                >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-            </div>
-            {showHints && password.length > 0 && (
-                <div className="space-y-1 text-xs">
-                    <PasswordHint passed={hasMinLength} text={`At least ${minLength || 8} characters`} />
-                    <PasswordHint passed={hasUppercase} text="One uppercase letter" />
-                    <PasswordHint passed={hasLowercase} text="One lowercase letter" />
-                    <PasswordHint passed={hasNumber} text="One number" />
-                    <PasswordHint passed={hasSpecial} text="One special character" />
-                </div>
-            )}
-        </div>
-    );
-}
-
-function PasswordHint({ passed, text }: { passed: boolean; text: string }) {
-    return (
-        <div className={clsx('flex items-center gap-1', passed ? 'text-success' : 'text-muted-foreground')}>
-            {passed ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-            <span>{text}</span>
-        </div>
-    );
-}
-
 function SelectField({
     value,
     onChange,
@@ -575,7 +509,7 @@ function SelectField({
 
                 const errorMsg = error instanceof Error ? error.message : 'Network error';
                 setFetchError(`Failed to load options: ${errorMsg}`);
-                console.error(`[OttaForms] Fetch error for ${relationship.entity}:`, error);
+                console.error(`[OttaForms] Fetch error for ${relationship.entity}:`, redactErrorForLog(error));
                 return [];
             });
             latestLoadRef.current = safeLoadPromise;
@@ -631,6 +565,10 @@ function SelectField({
     );
 }
 
+/**
+ * File/image field: `@ottabase/ui` FileInput for picking, size checks and the preview; this keeps the upload to
+ * `uploadEndpoint` (when set) and the blob URL of a picked image.
+ */
 function FileField({
     name,
     value,
@@ -651,7 +589,6 @@ function FileField({
     /** Custom upload endpoint (e.g. /api/files) */
     uploadEndpoint?: string;
 }) {
-    const inputRef = React.useRef<HTMLInputElement>(null);
     const localPreviewRef = React.useRef<string | null>(null);
     const uploadControllerRef = React.useRef<AbortController | null>(null);
     const mountedRef = React.useRef(true);
@@ -673,7 +610,6 @@ function FileField({
         const sanitized = sanitizeUrl(value);
         return sanitized === '#' ? null : sanitized;
     }, [isImage, value]);
-    const preview = localPreview || serverPreview;
 
     React.useEffect(() => {
         // React StrictMode runs an extra setup/cleanup cycle in development.
@@ -690,16 +626,11 @@ function FileField({
         };
     }, []);
 
-    const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+    const handleFiles = async (files: File[]) => {
+        const file = files[0];
         if (!file) return;
 
         setError(null);
-
-        if (maxSize && file.size > maxSize) {
-            setError(`File size exceeds ${formatFileSize(maxSize)}`);
-            return;
-        }
 
         // Show preview for images
         if (isImage) {
@@ -709,119 +640,82 @@ function FileField({
             setLocalPreview(objectUrl);
         }
 
-        // If upload endpoint is provided, upload the file
-        if (uploadEndpoint) {
-            uploadControllerRef.current?.abort();
-            const controller = new AbortController();
-            uploadControllerRef.current = controller;
-            setUploading(true);
-
-            try {
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('name', file.name);
-
-                const result = await request<unknown>(uploadEndpoint, {
-                    method: 'POST',
-                    body: formData,
-                    signal: controller.signal,
-                });
-                const fileUrl = getUploadLocation(result);
-                onChange(fileUrl);
-            } catch (err) {
-                if (controller.signal.aborted) return;
-                const errorMsg = err instanceof Error ? err.message : 'Upload failed';
-                setError(errorMsg);
-                console.error('[OttaForms] File upload error:', err);
-                clearLocalPreview();
-            } finally {
-                if (uploadControllerRef.current === controller) {
-                    uploadControllerRef.current = null;
-                }
-                if (mountedRef.current) {
-                    setUploading(false);
-                }
-            }
-        } else {
+        if (!uploadEndpoint) {
             // No upload endpoint - just pass the File object
             onChange(file);
+            return;
+        }
+
+        uploadControllerRef.current?.abort();
+        const controller = new AbortController();
+        uploadControllerRef.current = controller;
+        setUploading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('name', file.name);
+
+            const result = await request<unknown>(uploadEndpoint, {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal,
+            });
+            onChange(getUploadLocation(result));
+        } catch (err) {
+            if (controller.signal.aborted) return;
+            setError(err instanceof Error ? err.message : 'Upload failed');
+            console.error('[OttaForms] File upload error:', redactErrorForLog(err));
+            clearLocalPreview();
+        } finally {
+            if (uploadControllerRef.current === controller) {
+                uploadControllerRef.current = null;
+            }
+            if (mountedRef.current) {
+                setUploading(false);
+            }
         }
     };
 
     return (
-        <div className="space-y-2">
-            <div
-                className={clsx(
-                    'flex w-full items-center justify-center',
-                    'rounded-xl border border-dashed border-border/60 bg-muted/40',
-                    'cursor-pointer transition-colors duration-normal hover:bg-muted/70',
-                    (disabled || uploading) && 'cursor-not-allowed opacity-50',
-                )}
-                onClick={() => !disabled && !uploading && inputRef.current?.click()}
-            >
-                {uploading ? (
-                    <div className="flex flex-col items-center justify-center px-4 py-8">
-                        <Loader2 className="mb-2 h-6 w-6 animate-spin text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">Uploading…</p>
-                    </div>
-                ) : isImage && preview ? (
-                    <div className="relative w-full p-2">
-                        <img src={preview} alt="Preview" className="mx-auto max-h-48 rounded-lg" />
-                        <button
-                            type="button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                clearLocalPreview();
-                                onChange(null);
-                                if (inputRef.current) inputRef.current.value = '';
-                            }}
-                            aria-label="Remove image"
-                            className="absolute right-4 top-4 rounded-full bg-background p-1.5 text-muted-foreground ring-1 ring-border transition-colors duration-normal hover:text-destructive"
-                        >
-                            <X className="h-3.5 w-3.5" />
-                        </button>
-                    </div>
-                ) : (
-                    <div className="flex flex-col items-center justify-center px-4 py-8">
-                        <Upload className="mb-2 h-6 w-6 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">
-                            Click to upload {isImage ? 'an image' : 'a file'}
-                        </p>
-                        {accept && (
-                            <p className="mt-1 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
-                                Accepted: {accept}
-                            </p>
-                        )}
-                        {uploadEndpoint && (
-                            <p className="mt-1 text-xs text-muted-foreground">Files will be uploaded automatically</p>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            <input
-                ref={inputRef}
-                type="file"
-                name={name}
-                onChange={handleChange}
-                accept={accept}
-                disabled={disabled || uploading}
-                className="hidden"
-            />
-
-            {error && (
-                <div className="flex items-center gap-1 text-xs text-destructive">
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    <span>{error}</span>
-                </div>
-            )}
-        </div>
+        <FileInput
+            id={name}
+            name={name}
+            accept={accept}
+            maxSize={maxSize}
+            disabled={disabled}
+            loading={uploading}
+            error={error}
+            previewUrl={isImage ? localPreview || serverPreview : null}
+            placeholder={`Click to upload ${isImage ? 'an image' : 'a file'}`}
+            hint={
+                uploadEndpoint
+                    ? `${accept ? `Accepted: ${accept}. ` : ''}Files will be uploaded automatically`
+                    : undefined
+            }
+            onChange={(files) => void handleFiles(files)}
+            onClear={() => {
+                clearLocalPreview();
+                setError(null);
+                onChange(null);
+            }}
+        />
     );
 }
 
 // ============================================================
 // Utility Functions
 // ============================================================
+
+/** A form value as a number for NumberInput: numbers pass, numeric strings parse, anything else is empty. */
+function toNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isNaN(value) ? null : value;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+}
 
 function getUploadLocation(result: unknown): string {
     if (!result || typeof result !== 'object' || Array.isArray(result)) {
@@ -919,15 +813,6 @@ function formatDisplayValue(value: unknown, field: ModelFieldDescriptor): string
         default:
             return String(value);
     }
-}
-
-/**
- * Format file size for display
- */
-function formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export default FormField;
