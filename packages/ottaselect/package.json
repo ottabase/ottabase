@@ -32,6 +32,7 @@
     },
     "dependencies": {
         "@ottabase/config": "workspace:*",
+        "@ottabase/ui": "workspace:*",
         "clsx": "catalog:",
         "lucide-react": "catalog:"
     },

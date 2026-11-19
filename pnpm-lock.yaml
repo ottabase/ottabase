@@ -2411,6 +2411,9 @@ importers:
       '@ottabase/config':
         specifier: workspace:*
         version: link:../config
+      '@ottabase/ui':
+        specifier: workspace:*
+        version: link:../ui
       clsx:
         specifier: 'catalog:'
         version: 2.1.1

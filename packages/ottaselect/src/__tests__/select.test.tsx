@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as ottaSelect from '../index';
 
 // Mock select component
@@ -175,5 +175,49 @@ describe('OttaSelect Component', () => {
                 '[--otta-select-trigger-min-height:calc(1.75rem_+_var(--otta-select-space)*2.5)]',
             );
         });
+    });
+});
+
+describe('<OttaSelect mode="multiple"> chips', () => {
+    const picked = ['Alpha', 'Beta', 'Gamma', 'Delta'].map((name, i) => ({ id: String(i + 1), name }));
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    afterEach(() => {
+        globalThis.ResizeObserver = OriginalResizeObserver;
+        vi.restoreAllMocks();
+    });
+
+    it('shows every chip until measured, each removable', () => {
+        const onChange = vi.fn();
+        render(<ottaSelect.OttaSelect mode="multiple" items={picked} value={picked} onChange={onChange} />);
+        expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(4);
+        expect(screen.queryByText(/more$/)).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Remove Beta' }));
+        expect(onChange).toHaveBeenCalledWith(picked.filter((item) => item.name !== 'Beta'));
+    });
+
+    it('folds the chips that do not fit into "+N more", the shown ones still removable', () => {
+        // Row 130px; every chip and the marker measure 40px: marker + 2 chips fit
+        globalThis.ResizeObserver = class {
+            constructor(private callback: ResizeObserverCallback) {}
+            observe() {
+                this.callback(
+                    [{ contentRect: { width: 130, height: 24 } } as ResizeObserverEntry],
+                    this as unknown as ResizeObserver,
+                );
+            }
+            unobserve() {}
+            disconnect() {}
+        } as unknown as typeof ResizeObserver;
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 40 } as DOMRect);
+        const onChange = vi.fn();
+        render(<ottaSelect.OttaSelect mode="multiple" items={picked} value={picked} onChange={onChange} />);
+        // The measuring copy is aria-hidden, so only the visible chips are buttons
+        expect(screen.getAllByRole('button', { name: /^Remove / }).map((b) => b.getAttribute('aria-label'))).toEqual([
+            'Remove Alpha',
+            'Remove Beta',
+        ]);
+        expect(screen.getByText('+2 more')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Remove Alpha' }));
+        expect(onChange).toHaveBeenCalledWith(picked.slice(1));
     });
 });

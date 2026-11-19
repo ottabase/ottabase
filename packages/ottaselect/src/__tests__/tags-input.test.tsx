@@ -44,6 +44,13 @@ describe('<OttaTagsInput>', () => {
         fireEvent.focus(input());
         type('edg');
         expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Edge', 'Ledge', 'Create “edg”']);
+        // The typed text is picked out in each suggestion, whatever its case
+        expect(
+            screen
+                .getAllByRole('option')
+                .slice(0, 2)
+                .map((o) => o.querySelector('mark')?.textContent),
+        ).toEqual(['Edg', 'edg']);
         // The best match is armed, not Create: a prefix picks the existing tag
         expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true');
 

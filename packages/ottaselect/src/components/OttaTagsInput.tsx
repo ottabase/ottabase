@@ -1,3 +1,4 @@
+import { Highlight, useDebouncedValue } from '@ottabase/ui';
 import { clsx } from 'clsx';
 import { Loader2, Plus, X } from 'lucide-react';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -75,18 +76,8 @@ export interface OttaTagsInputProps {
 
 type Option = { type: 'create'; label: string } | { type: 'item'; item: OttaSelectItem };
 
-/** The name with the typed text picked out, so a person sees why a row matched. */
-function highlight(name: string, query: string) {
-    const at = query ? name.toLowerCase().indexOf(query) : -1;
-    if (at < 0) return name;
-    return (
-        <>
-            {name.slice(0, at)}
-            <span className="font-semibold text-foreground">{name.slice(at, at + query.length)}</span>
-            {name.slice(at + query.length)}
-        </>
-    );
-}
+/** A match in a suggestion: bold, no fill, as the rest of the row. */
+const MATCH_CLASS = 'bg-transparent font-semibold text-foreground';
 
 export function OttaTagsInput({
     value,
@@ -153,14 +144,17 @@ export function OttaTagsInput({
     const staticItems = useMemo(() => items.map(normalizeItem), [items]);
     const source = fetchCollection ? fetched : staticItems;
 
+    // The typed text once it settles; null while closed, so opening waits for the debounce like typing does
+    const settledQuery = useDebouncedValue(open ? query.trim() : null, searchDebounceMs);
+
     useEffect(() => {
-        if (!fetchCollection || !open) return;
+        if (!fetchCollection || !open || settledQuery === null) return;
         let live = true;
-        const timer = setTimeout(async () => {
+        (async () => {
             setLoading(true);
             setError(null);
             try {
-                const results = await fetchCollection(query.trim());
+                const results = await fetchCollection(settledQuery);
                 if (live) setFetched(results.map(normalizeItem));
             } catch (err) {
                 if (live) {
@@ -170,12 +164,11 @@ export function OttaTagsInput({
             } finally {
                 if (live) setLoading(false);
             }
-        }, searchDebounceMs);
+        })();
         return () => {
             live = false;
-            clearTimeout(timer);
         };
-    }, [fetchCollection, open, query, searchDebounceMs, errorMessage]);
+    }, [fetchCollection, open, settledQuery, errorMessage]);
 
     const isTagged = useCallback(
         (label: string) => tagsRef.current.some((tag) => labelKey(tag.name) === labelKey(label)),
@@ -534,7 +527,14 @@ export function OttaTagsInput({
                                 </>
                             ) : (
                                 <span className="min-w-0 flex-1 truncate">
-                                    {renderItem ? renderItem(option.item) : highlight(option.item.name, search)}
+                                    {renderItem ? (
+                                        renderItem(option.item)
+                                    ) : (
+                                        // The typed text picked out, so a person sees why a row matched
+                                        <Highlight highlight={search} highlightClassName={MATCH_CLASS}>
+                                            {option.item.name}
+                                        </Highlight>
+                                    )}
                                 </span>
                             )}
                         </li>

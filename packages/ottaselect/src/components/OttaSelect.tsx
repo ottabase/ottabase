@@ -1,6 +1,7 @@
+import { Highlight, OverflowList, useClickOutside, useDebouncedValue } from '@ottabase/ui';
 import { clsx } from 'clsx';
 import { Check, ChevronDown, Loader2, Plus, Search, X } from 'lucide-react';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { labelKey, normalizeItem, type OttaCreateResult, type OttaSelectInputItem, type OttaSelectItem } from './items';
 
 export type { OttaCreateResult, OttaSelectInputItem, OttaSelectItem } from './items';
@@ -275,33 +276,21 @@ export function OttaSelect({
 }: OttaSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+    const debouncedSearchQuery = useDebouncedValue(searchQuery, searchDebounceMs);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [fetchedItems, setFetchedItems] = useState<OttaSelectItem[]>([]);
     const [focusedIndex, setFocusedIndex] = useState(-1);
-    const [visibleChipCount, setVisibleChipCount] = useState<number | null>(null);
     const [isCreating, setIsCreating] = useState(false);
 
     const containerRef = useRef<HTMLDivElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
-    const chipsContainerRef = useRef<HTMLDivElement>(null);
-    const measureRef = useRef<HTMLDivElement>(null);
 
     // Normalize static items
     const normalizedStaticItems = useMemo(() => {
         return items.map(normalizeItem);
     }, [items]);
-
-    // Debounce search query
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setDebouncedSearchQuery(searchQuery);
-        }, searchDebounceMs);
-
-        return () => clearTimeout(timer);
-    }, [searchQuery, searchDebounceMs]);
 
     // Fetch collection when search query changes
     useEffect(() => {
@@ -527,21 +516,18 @@ export function OttaSelect({
         }
     }, [focusedIndex]);
 
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-                // Clear search query when closing if no selection
-                if (mode === 'single' && !value) {
-                    setSearchQuery('');
-                }
+    // Close dropdown when clicking outside (listening only while open)
+    useClickOutside(
+        containerRef,
+        () => {
+            setIsOpen(false);
+            // Clear search query when closing if no selection
+            if (mode === 'single' && !value) {
+                setSearchQuery('');
             }
-        };
-
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [mode, value]);
+        },
+        isOpen,
+    );
 
     // Focus search input when opening
     useEffect(() => {
@@ -554,73 +540,6 @@ export function OttaSelect({
     useEffect(() => {
         setFocusedIndex(-1);
     }, [filteredItems]);
-
-    // Calculate how many chips can fit
-    useLayoutEffect(() => {
-        if (mode !== 'multiple' || !showChips || selectedItems.length === 0) {
-            setVisibleChipCount(null);
-            return;
-        }
-
-        const calculateVisibleChips = () => {
-            if (!chipsContainerRef.current || !measureRef.current) return;
-
-            const containerWidth = chipsContainerRef.current.offsetWidth;
-            // Reserve space for "+N more" badge and some padding
-            const reservedWidth = 70;
-            const availableWidth = containerWidth - reservedWidth;
-
-            let usedWidth = 0;
-            let count = 0;
-            const inheritedStyles = getComputedStyle(chipsContainerRef.current);
-            // The chips container applies `gap: var(--otta-select-chip-gap)`, so the browser
-            // resolves it to pixels in `columnGap`. Read that rather than the raw
-            // `--otta-select-chip-gap` custom property, whose value is an unresolved `calc(...)`
-            // string (parseFloat -> NaN, which is why this previously always fell back to 4). This
-            // keeps the between-chip spacing in sync with the active size/spacing tokens.
-            const parsedGap = parseFloat(inheritedStyles.columnGap);
-            const gap = Number.isFinite(parsedGap) ? parsedGap : 4;
-
-            // Measure each chip
-            const measureContainer = measureRef.current;
-            measureContainer.innerHTML = '';
-
-            for (const item of selectedItems) {
-                // Create a temporary chip to measure
-                const chipEl = document.createElement('span');
-                chipEl.className = 'inline-flex items-center whitespace-nowrap';
-                chipEl.style.gap = inheritedStyles.getPropertyValue('--otta-select-chip-gap');
-                chipEl.style.paddingInline = inheritedStyles.getPropertyValue('--otta-select-chip-padding-x');
-                chipEl.style.paddingBlock = inheritedStyles.getPropertyValue('--otta-select-chip-padding-y');
-                chipEl.style.fontSize = inheritedStyles.getPropertyValue('--otta-select-chip-font-size');
-                chipEl.style.borderRadius = inheritedStyles.getPropertyValue('--otta-select-chip-radius');
-                chipEl.textContent = item.name;
-                measureContainer.appendChild(chipEl);
-
-                const chipWidth = chipEl.offsetWidth + (count > 0 ? gap : 0);
-
-                if (usedWidth + chipWidth <= availableWidth) {
-                    usedWidth += chipWidth;
-                    count++;
-                } else {
-                    break;
-                }
-            }
-
-            // Show at least 1 chip if there's any selection
-            setVisibleChipCount(Math.max(1, count));
-        };
-
-        calculateVisibleChips();
-
-        // Recalculate on resize
-        const resizeObserver = new ResizeObserver(calculateVisibleChips);
-        if (chipsContainerRef.current) {
-            resizeObserver.observe(chipsContainerRef.current);
-        }
-
-        return () => resizeObserver.disconnect();
-    }, [mode, showChips, selectedItems]);
 
     // Get display text/content
     const displayContent = useMemo(() => {
@@ -641,29 +560,21 @@ export function OttaSelect({
 
         // Show chips mode
         if (showChips) {
-            const visibleItems = visibleChipCount !== null ? selectedItems.slice(0, visibleChipCount) : selectedItems;
-            const hiddenCount = selectedItems.length - visibleItems.length;
-
+            // As many chips as fit on the line (measured, real widths), then "+N more"; at least one shows
             return (
-                <div
-                    ref={chipsContainerRef}
-                    className="flex items-center gap-[var(--otta-select-chip-gap)] flex-1 overflow-hidden"
-                >
-                    {visibleItems.map((item, index) => (
-                        <Chip
-                            key={item.id || `chip-${index}`}
-                            item={item}
-                            renderChip={renderChip}
-                            onRemove={handleRemoveChip}
-                            disabled={disabled}
-                        />
-                    ))}
-                    {hiddenCount > 0 && (
+                <OverflowList
+                    items={selectedItems}
+                    minVisible={1}
+                    className="flex-1 gap-[var(--otta-select-chip-gap)]"
+                    renderItem={(item) => (
+                        <Chip item={item} renderChip={renderChip} onRemove={handleRemoveChip} disabled={disabled} />
+                    )}
+                    renderOverflow={(hidden) => (
                         <span className="text-[length:var(--otta-select-chip-font-size)] text-muted-foreground whitespace-nowrap">
-                            +{hiddenCount} more
+                            +{hidden.length} more
                         </span>
                     )}
-                </div>
+                />
             );
         }
 
@@ -675,24 +586,24 @@ export function OttaSelect({
             return selectedItems[0].name;
         }
         return `${selectedItems.length} items selected`;
-    }, [
-        mode,
-        selectedItems,
-        placeholder,
-        renderValue,
-        renderChip,
-        showChips,
-        visibleChipCount,
-        handleRemoveChip,
-        disabled,
-    ]);
+    }, [mode, selectedItems, placeholder, renderValue, renderChip, showChips, handleRemoveChip, disabled]);
 
     const hasValue = selectedItems.length > 0;
 
     // Default item renderer
-    const defaultRenderItem = useCallback((props: ItemRendererProps) => {
-        return <span className="truncate flex-1">{props.item.name}</span>;
-    }, []);
+    // The search text picked out in each row, so a person sees why it matched
+    const defaultRenderItem = useCallback(
+        (props: ItemRendererProps) => (
+            <Highlight
+                highlight={searchQuery}
+                highlightClassName="bg-transparent font-semibold text-foreground"
+                className="truncate flex-1"
+            >
+                {props.item.name}
+            </Highlight>
+        ),
+        [searchQuery],
+    );
 
     const itemRenderer = renderItem || defaultRenderItem;
     const sizeClasses = OTTA_SELECT_SIZE_CLASSES[size];
@@ -710,13 +621,6 @@ export function OttaSelect({
             )}
             onKeyDown={handleKeyDown}
         >
-            {/* Hidden measure container */}
-            <div
-                ref={measureRef}
-                className="absolute -left-[9999px] flex items-center gap-[var(--otta-select-chip-gap)]"
-                aria-hidden="true"
-            />
-
             {/* Trigger Button */}
             <button
                 type="button"
