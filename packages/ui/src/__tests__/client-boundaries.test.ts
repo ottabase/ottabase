@@ -10,6 +10,9 @@ const overrideAwarePrimitives = ['badge.tsx', 'button.tsx', 'card.tsx', 'input.t
 const statefulComposedComponents = [
     'dark-mode-toggle.tsx',
     'json-editor.tsx',
+    'overflow-list.tsx',
+    'show-more.tsx',
+    'table-of-contents.tsx',
     'rating.tsx',
     'split-pane.tsx',
     'tree-view.tsx',

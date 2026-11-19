@@ -326,6 +326,73 @@ import { ColorInput, FileInput, NumberInput, PasswordInput, Slider, Textarea } f
   (`aria-invalid`) and reverts on blur. Hex only.
 - **Checkbox** with `checked="indeterminate"` shows a dash.
 
+## Display building blocks
+
+```tsx
+import {
+    DataList, DataListItem, DataListLabel, DataListValue, LoadingOverlay, Indicator, Avatar, AvatarFallback,
+    Highlight, ShowMore, OverflowList, Tag, TableOfContents, DiffView,
+} from '@ottabase/ui';
+
+<DataList orientation="vertical" className="sm:grid-cols-2">
+    <DataListItem>
+        <DataListLabel>Release</DataListLabel>
+        <DataListValue>1.4.2</DataListValue>
+    </DataListItem>
+</DataList>
+
+<div className="relative" aria-busy={saving}>
+    <Form />
+    <LoadingOverlay visible={saving} label="Saving…" />
+</div>
+
+<Indicator count={unread} indicatorLabel={`${unread} unread`}>
+    <Avatar><AvatarFallback>DT</AvatarFallback></Avatar>
+</Indicator>
+<Indicator tone="green" processing position="bottom-end" offset={4}><Avatar>…</Avatar></Indicator>
+
+<Highlight highlight={query}>{item.name}</Highlight>
+
+<ShowMore maxHeight={160}><pre>{alert.body}</pre></ShowMore>
+
+<OverflowList items={tags} className="gap-1.5" renderItem={(tag) => <Tag>{tag}</Tag>} />
+
+<TableOfContents items={[{ id: 'setup', label: 'Setup', depth: 2 }]} selector=".prose h2, .prose h3" title="On this page" />
+
+<DiffView before={{ name: 'Old', plan: 'pro' }} after={{ name: 'New', plan: 'pro' }} />  // field diff
+<DiffView before={oldText} after={newText} />                                            // line diff
+<DiffView parts={diffWords(oldText, newText)} />                                         // your own word diff
+```
+
+- **DataList** is a `<dl>`: `orientation="horizontal"` (default) puts labels in their own column (each item a subgrid
+  row, so values line up); `vertical` stacks label over value. `size` is `sm` or `default`. A server component.
+- **LoadingOverlay** covers its `relative` parent: content stays visible, dimmed and blurred, under a spinner and an
+  optional `label`. It is a polite `role="status"`; mark the covered region `aria-busy`. `visible={false}` renders
+  nothing; `blur={false}` only dims. Its root is a `<span>`, so it is valid inside a button.
+- **Indicator** pins a dot (no `label`/`count`) or a mark to a corner of its child: `count` caps at `max` ("99+") and
+  hides at zero unless `showZero`; `position` is `top-end` (default), `top-start`, `bottom-end` or `bottom-start`;
+  `offset` moves it in from the corner (round children); `tone` reads the tone map; `processing` pulses (still under
+  reduced motion); `disabled` hides it; `indicatorLabel` is what a screen reader hears.
+- **Highlight** wraps case-insensitive matches of `highlight` (a string or several) in `<mark>`; regex characters are
+  literal. `highlightClassName` restyles the marks (`bg-transparent font-semibold` in a picker list).
+- **ShowMore** clamps content to `maxHeight` px with a fade and shows "Show more" / "Show less" only when the content is
+  taller. `expanded`/`defaultExpanded`/`onExpandedChange`, `showLabel`/`hideLabel`. (Mantine's Spoiler; the
+  blur-to-reveal `Spoiler` in `@ottabase/ottarenderer` is a different thing.)
+- **OverflowList** renders as many items as fit on one line, measured with real widths and re-fitted on resize, then
+  `renderOverflow(hidden)` (default a "+N" `CountBadge`). `minVisible` keeps some items regardless. Every item shows
+  until the row has a width (server render, tests).
+- **TableOfContents** lists `{ id, label, depth }` links. Pass `activeId`, or a `selector` for the headings and it
+  follows the scroll itself (`useScrollSpy`; `rescanKey` re-scans for a new document). A click scrolls (smoothly unless
+  the OS asks for reduced motion) and replaces the URL hash without the router seeing a navigation, then calls
+  `onItemClick`; Ctrl/Cmd/middle clicks open the link as usual. `unstyled` drops the Tailwind look so your CSS can style
+  the parts (`toc`, `toc-title`, `toc-list`, `toc-item`, `toc-link` with `data-active` and a `--toc-depth` variable);
+  `@ottabase/docs` and `@ottabase/legal` do that.
+- **DiffView** is a read-only before/after. Two objects give a field diff (added, removed, `old → new`; nested values as
+  compact JSON, compared deeply; `showUnchanged` lists the rest). Two strings give a line diff (a built-in LCS, no
+  dependency; CRLF counts as LF and a final newline is not an extra line). `parts` takes changes you computed, in the
+  `diff` package's `{ value, added?, removed? }` shape, for a word-level diff of prose. `diffFields` and `diffLines` are
+  exported too. The admin audit log shows `changes` with it.
+
 ## Theming hooks (Brand Engine)
 
 Components are fully themeable by the brand engine without forking:

@@ -392,6 +392,46 @@
             "types": "./dist/hooks.d.ts",
             "import": "./dist/hooks.mjs",
             "require": "./dist/hooks.js"
+        },
+        "./data-list": {
+            "types": "./dist/data-list.d.ts",
+            "import": "./dist/data-list.mjs",
+            "require": "./dist/data-list.js"
+        },
+        "./loading-overlay": {
+            "types": "./dist/loading-overlay.d.ts",
+            "import": "./dist/loading-overlay.mjs",
+            "require": "./dist/loading-overlay.js"
+        },
+        "./indicator": {
+            "types": "./dist/indicator.d.ts",
+            "import": "./dist/indicator.mjs",
+            "require": "./dist/indicator.js"
+        },
+        "./highlight": {
+            "types": "./dist/highlight.d.ts",
+            "import": "./dist/highlight.mjs",
+            "require": "./dist/highlight.js"
+        },
+        "./show-more": {
+            "types": "./dist/show-more.d.ts",
+            "import": "./dist/show-more.mjs",
+            "require": "./dist/show-more.js"
+        },
+        "./overflow-list": {
+            "types": "./dist/overflow-list.d.ts",
+            "import": "./dist/overflow-list.mjs",
+            "require": "./dist/overflow-list.js"
+        },
+        "./table-of-contents": {
+            "types": "./dist/table-of-contents.d.ts",
+            "import": "./dist/table-of-contents.mjs",
+            "require": "./dist/table-of-contents.js"
+        },
+        "./diff-view": {
+            "types": "./dist/diff-view.d.ts",
+            "import": "./dist/diff-view.mjs",
+            "require": "./dist/diff-view.js"
         }
     },
     "files": [

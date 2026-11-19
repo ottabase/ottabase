@@ -349,5 +349,33 @@ export { MessageBox, type MessageBoxProps, type MessageTypes, type SkeletonType 
 export { SplitPane, type SplitPaneProps, type SplitType } from './split-pane';
 export { CopyButton, type CopyButtonProps } from './copy-button';
 
+// Display building blocks
+export {
+    DataList,
+    DataListItem,
+    DataListLabel,
+    DataListValue,
+    dataListVariants,
+    type DataListProps,
+} from './data-list';
+export { LoadingOverlay, type LoadingOverlayProps } from './loading-overlay';
+export { Indicator, indicatorContent, type IndicatorPosition, type IndicatorProps } from './indicator';
+export { Highlight, highlightChunks, type HighlightProps } from './highlight';
+export { ShowMore, type ShowMoreProps } from './show-more';
+export { OverflowList, fitCount, type OverflowListProps } from './overflow-list';
+export { TableOfContents, type TableOfContentsItem, type TableOfContentsProps } from './table-of-contents';
+export {
+    DiffView,
+    diffFields,
+    diffLines,
+    formatDiffValue,
+    type DiffChangeType,
+    type DiffPart,
+    type DiffRecord,
+    type DiffViewProps,
+    type FieldChange,
+    type LineChange,
+} from './diff-view';
+
 // Generic DOM/UI hooks (also on their own entry, `@ottabase/ui/hooks`)
 export * from './hooks';

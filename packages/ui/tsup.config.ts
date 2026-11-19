@@ -84,6 +84,15 @@ const componentEntries = [
     'components/ui/message-box.tsx',
     'components/ui/split-pane.tsx',
     'components/ui/copy-button.tsx',
+    // Display building blocks
+    'components/ui/data-list.tsx',
+    'components/ui/loading-overlay.tsx',
+    'components/ui/indicator.tsx',
+    'components/ui/highlight.tsx',
+    'components/ui/show-more.tsx',
+    'components/ui/overflow-list.tsx',
+    'components/ui/table-of-contents.tsx',
+    'components/ui/diff-view.tsx',
     // Generic hooks (copy-button imports them as a sibling)
     'components/ui/hooks.ts',
     // Internal sibling module (sidebar imports it), emitted so the flattened relative import resolves
