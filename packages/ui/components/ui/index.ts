@@ -338,3 +338,7 @@ export { ConfirmDialog, type ConfirmDialogProps, type ConfirmDialogTone } from '
 export { DarkModeToggle, type DarkModeToggleProps } from './dark-mode-toggle';
 export { MessageBox, type MessageBoxProps, type MessageTypes, type SkeletonType } from './message-box';
 export { SplitPane, type SplitPaneProps, type SplitType } from './split-pane';
+export { CopyButton, type CopyButtonProps } from './copy-button';
+
+// Generic DOM/UI hooks (also on their own entry, `@ottabase/ui/hooks`)
+export * from './hooks';

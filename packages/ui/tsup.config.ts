@@ -79,6 +79,9 @@ const componentEntries = [
     'components/ui/json-editor.tsx',
     'components/ui/message-box.tsx',
     'components/ui/split-pane.tsx',
+    'components/ui/copy-button.tsx',
+    // Generic hooks (copy-button imports them as a sibling)
+    'components/ui/hooks.ts',
     // Internal sibling module (sidebar imports it), emitted so the flattened relative import resolves
     'components/ui/use-mobile.ts',
 ];

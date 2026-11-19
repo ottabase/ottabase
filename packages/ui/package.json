@@ -362,6 +362,16 @@
             "types": "./dist/split-pane.d.ts",
             "import": "./dist/split-pane.mjs",
             "require": "./dist/split-pane.js"
+        },
+        "./copy-button": {
+            "types": "./dist/copy-button.d.ts",
+            "import": "./dist/copy-button.mjs",
+            "require": "./dist/copy-button.js"
+        },
+        "./hooks": {
+            "types": "./dist/hooks.d.ts",
+            "import": "./dist/hooks.mjs",
+            "require": "./dist/hooks.js"
         }
     },
     "files": [

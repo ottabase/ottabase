@@ -322,6 +322,51 @@ Components are fully themeable by the brand engine without forking:
     path; reserve overrides for DOM-level differences. These primitives declare explicit React client boundaries because
     resolving an override reads context; the package build preserves those directives for Next.js/RSC consumers.
 
+## Hooks
+
+Generic DOM hooks, on the root entry and on `@ottabase/ui/hooks`. Reach for them before writing a `useEffect` with a
+document listener, a `setTimeout` debounce or raw `localStorage`.
+
+```tsx
+import {
+    CopyButton,
+    useClickOutside,
+    useDebouncedCallback,
+    useHotkeys,
+    useLocalStorage,
+    useMediaQuery,
+} from '@ottabase/ui';
+import { useRef, useState } from 'react';
+
+export function Toolbar({ onSearch }: { onSearch: (term: string) => void }) {
+    const [open, setOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const [density, setDensity] = useLocalStorage<'compact' | 'comfortable'>('app.density', 'comfortable');
+    const isMobile = useMediaQuery('(max-width: 767px)');
+    const search = useDebouncedCallback(onSearch, 300);
+
+    useClickOutside(menuRef, () => setOpen(false), open); // listens only while open
+    useHotkeys([
+        ['mod+k', () => setOpen(true)],
+        ['escape', () => setOpen(false)],
+    ]);
+
+    return (
+        <div ref={menuRef} data-density={density}>
+            <input onChange={(e) => search(e.target.value)} />
+            {!isMobile && <CopyButton value="ok_live_123" label="API key" notify />}
+            <button onClick={() => setDensity('compact')}>Compact</button>
+        </div>
+    );
+}
+```
+
+- `useLocalStorage` stores JSON and syncs every hook on the key, across tabs too; `getStorageValue` / `setStorageValue`
+  do the same outside React. Setting `undefined` removes the key.
+- `useHotkeys` skips single-key shortcuts while typing in a field; `mod` shortcuts (Cmd or Ctrl) still fire there.
+- Also: `useClipboard` (custom copy UI), `useDebouncedValue`, `useReducedMotion`, `useElementSize`, `useMergedRef`,
+  `useScrollSpy`, `useLatest`, `parseShortcut`, `isEditableTarget`.
+
 ## Base styles
 
 `styles/ui.css` also carries the few base rules Tailwind's reset leaves out: the body fills the viewport, the app root
