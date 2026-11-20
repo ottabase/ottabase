@@ -178,6 +178,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { DemoPageHeader } from '../DemoPageHeader';
+import { BuildingBlocksSection } from './BuildingBlocksSection';
 import { ComposedComponentsSection } from './ComposedComponentsSection';
 import { DataDisplaySection } from './DataDisplaySection';
 
@@ -189,6 +190,7 @@ const formSchema = z.object({
 export function UiDemoPage() {
     const [progress, setProgress] = useState(33);
     const [sliderValue, setSliderValue] = useState([50]);
+    const [rangeValue, setRangeValue] = useState([20, 80]);
     const [enabled, setEnabled] = useState(true);
     const [date, setDate] = useState<Date | undefined>(new Date());
     const [otp, setOtp] = useState('');
@@ -314,12 +316,27 @@ export function UiDemoPage() {
                             <Textarea id="note" placeholder="Type something…" rows={3} />
                         </div>
 
+                        <div className="grid gap-2">
+                            <Label htmlFor="note-autosize">Textarea autosize (2–6 rows)</Label>
+                            <Textarea
+                                id="note-autosize"
+                                autosize
+                                minRows={2}
+                                maxRows={6}
+                                placeholder="Grows as you type, then scrolls…"
+                            />
+                        </div>
+
                         <Separator />
 
                         <div className="flex flex-wrap items-center gap-6">
                             <div className="flex items-center gap-2">
                                 <Checkbox id="terms" />
                                 <Label htmlFor="terms">Accept terms</Label>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Checkbox id="some" checked="indeterminate" />
+                                <Label htmlFor="some">Indeterminate</Label>
                             </div>
                             <div className="flex items-center gap-3">
                                 <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -339,6 +356,23 @@ export function UiDemoPage() {
                                     className="flex-1"
                                 />
                                 <span className="w-12 text-sm text-muted-foreground">{sliderValue[0]}</span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label>Range slider</Label>
+                            <div className="flex items-center gap-4">
+                                <Slider
+                                    value={rangeValue}
+                                    onValueChange={setRangeValue}
+                                    max={100}
+                                    minStepsBetweenThumbs={5}
+                                    thumbLabels={['Minimum', 'Maximum']}
+                                    className="flex-1"
+                                />
+                                <span className="w-16 text-sm text-muted-foreground">
+                                    {rangeValue[0]}–{rangeValue[1]}
+                                </span>
                             </div>
                         </div>
                     </CardContent>
@@ -1255,6 +1289,8 @@ export function UiDemoPage() {
             </section>
 
             <DataDisplaySection />
+
+            <BuildingBlocksSection />
 
             <ComposedComponentsSection />
         </div>
