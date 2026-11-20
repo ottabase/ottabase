@@ -10,8 +10,8 @@ import { useElementSize } from './hooks';
 /*
  * Long content clamped to `maxHeight` with a fade, and a "Show more" /
  * "Show less" toggle that appears only when the content is taller than that.
- * (Mantine calls this Spoiler; @ottabase/ottarenderer already has a
- * blur-to-reveal Spoiler, hence the name.) Parts: show-more,
+ * (Not "Spoiler": @ottabase/ottarenderer already has a blur-to-reveal
+ * Spoiler.) Parts: show-more,
  * show-more-content, show-more-toggle; data-state="expanded|collapsed".
  */
 

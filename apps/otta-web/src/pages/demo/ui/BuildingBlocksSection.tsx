@@ -1,5 +1,5 @@
 /**
- * The building blocks added after the Mantine gap audit: the extra inputs, the small display pieces,
+ * The newer building blocks of @ottabase/ui: the extra inputs, the small display pieces,
  * CopyButton and the shared DOM hooks. The Slider range, the indeterminate Checkbox and Textarea
  * autosize sit in Forms & Inputs; the ottadate React pickers have their own page at /demo/ottadate.
  */

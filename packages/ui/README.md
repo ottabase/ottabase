@@ -376,8 +376,8 @@ import {
 - **Highlight** wraps case-insensitive matches of `highlight` (a string or several) in `<mark>`; regex characters are
   literal. `highlightClassName` restyles the marks (`bg-transparent font-semibold` in a picker list).
 - **ShowMore** clamps content to `maxHeight` px with a fade and shows "Show more" / "Show less" only when the content is
-  taller. `expanded`/`defaultExpanded`/`onExpandedChange`, `showLabel`/`hideLabel`. (Mantine's Spoiler; the
-  blur-to-reveal `Spoiler` in `@ottabase/ottarenderer` is a different thing.)
+  taller. `expanded`/`defaultExpanded`/`onExpandedChange`, `showLabel`/`hideLabel`. (The blur-to-reveal `Spoiler` in
+  `@ottabase/ottarenderer` is a different thing.)
 - **OverflowList** renders as many items as fit on one line, measured with real widths and re-fitted on resize, then
   `renderOverflow(hidden)` (default a "+N" `CountBadge`). `minVisible` keeps some items regardless. Every item shows
   until the row has a width (server render, tests).
