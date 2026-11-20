@@ -33,6 +33,11 @@
             "import": "./dist/parse.mjs",
             "require": "./dist/parse.js"
         },
+        "./react": {
+            "types": "./dist/react.d.ts",
+            "import": "./dist/react.mjs",
+            "require": "./dist/react.js"
+        },
         "./styles.css": "./dist/styles.css"
     },
     "scripts": {
@@ -48,11 +53,26 @@
         "date-fns": "catalog:",
         "date-fns-tz": "catalog:"
     },
+    "peerDependencies": {
+        "react": "catalog:"
+    },
+    "peerDependenciesMeta": {
+        "react": {
+            "optional": true
+        }
+    },
     "devDependencies": {
-        "typescript": "catalog:",
-        "tsup": "catalog:",
-        "rimraf": "catalog:",
+        "@testing-library/jest-dom": "catalog:",
+        "@testing-library/react": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
         "eslint": "catalog:",
+        "jsdom": "catalog:",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+        "rimraf": "catalog:",
+        "tsup": "catalog:",
+        "typescript": "catalog:",
         "vitest": "catalog:"
     },
     "license": "MIT",

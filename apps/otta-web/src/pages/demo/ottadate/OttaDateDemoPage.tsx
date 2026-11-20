@@ -7,49 +7,31 @@
  * - DateTimePicker
  * - FuzzyDateTimePicker
  *
- * Each picker is mounted as a vanilla JS widget inside React refs.
+ * Uses the controlled React components from @ottabase/ottadate/react.
  */
 
 import {
-    OttaDate,
     encodeFuzzyDateTime,
     getDefaultRangePresets,
     parseFuzzyInput,
-    type DatePickerInstance,
     type DateRange,
     type FuzzyDateTime,
 } from '@ottabase/ottadate';
+import {
+    DatePicker,
+    DateRangePicker,
+    DateTimePicker,
+    FuzzyDateTimeCompact,
+    FuzzyDateTimePicker,
+} from '@ottabase/ottadate/react';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from '@ottabase/ui';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { DemoPageHeader } from '../DemoPageHeader';
 // Styles are imported once at the app level or here
 import '@ottabase/ottadate/styles.css';
 
-// ---------------------------------------------------------------------------
-// Reusable hook: mount a vanilla JS picker into a React ref
-// ---------------------------------------------------------------------------
-
-function usePickerMount<T>(
-    factory: (container: HTMLElement) => T,
-    deps: any[] = [],
-): { ref: React.RefObject<HTMLDivElement | null>; instance: T | null } {
-    const ref = useRef<HTMLDivElement | null>(null);
-    const instanceRef = useRef<T | null>(null);
-
-    useEffect(() => {
-        if (!ref.current) return;
-        // Clean previous instance
-        ref.current.innerHTML = '';
-        const inst = factory(ref.current);
-        instanceRef.current = inst;
-        return () => {
-            (inst as any)?.destroy?.();
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, deps);
-
-    return { ref, instance: instanceRef.current };
-}
+// Built once: an inline getDefaultRangePresets() would hand the picker a new list every render
+const RANGE_PRESETS = getDefaultRangePresets();
 
 // ---------------------------------------------------------------------------
 // Demo sections
@@ -58,15 +40,6 @@ function usePickerMount<T>(
 function DatePickerDemo() {
     const [value, setValue] = useState<number | string | Date | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createDatePicker(el, {
-                placeholder: 'Pick a date…',
-                onChange: (v) => setValue(v),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -74,7 +47,7 @@ function DatePickerDemo() {
                 <CardDescription>Single date selection. Returns UTC unix timestamp by default.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <DatePicker placeholder="Pick a date…" value={value} onChange={setValue} />
                 <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                     {JSON.stringify({ value, type: typeof value }, null, 2)}
                 </pre>
@@ -86,15 +59,6 @@ function DatePickerDemo() {
 function DatePickerInlineDemo() {
     const [value, setValue] = useState<number | string | Date | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createDatePicker(el, {
-                inline: true,
-                onChange: (v) => setValue(v),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -102,7 +66,7 @@ function DatePickerInlineDemo() {
                 <CardDescription>Always-visible calendar, no popover trigger.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <DatePicker inline value={value} onChange={setValue} />
                 <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                     {value != null ? `Selected: ${value} (unix)` : 'No date selected'}
                 </pre>
@@ -114,15 +78,6 @@ function DatePickerInlineDemo() {
 function DateRangeDemo() {
     const [range, setRange] = useState<DateRange>({ start: null, end: null });
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createDateRangePicker(el, {
-                placeholder: 'Select a date range…',
-                onChange: (r) => setRange(r),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -132,7 +87,7 @@ function DateRangeDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <DateRangePicker placeholder="Select a date range…" value={range} onChange={setRange} />
                 <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                     {JSON.stringify(range, null, 2)}
                 </pre>
@@ -145,16 +100,6 @@ function DateRangeDemo() {
 function DateRangePresetsDemo() {
     const [range, setRange] = useState<DateRange>({ start: null, end: null });
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createDateRangePicker(el, {
-                placeholder: 'Pick a range…',
-                presets: getDefaultRangePresets(),
-                onChange: (r) => setRange(r),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -164,7 +109,12 @@ function DateRangePresetsDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <DateRangePicker
+                    placeholder="Pick a range…"
+                    presets={RANGE_PRESETS}
+                    value={range}
+                    onChange={setRange}
+                />
                 <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                     {JSON.stringify(range, null, 2)}
                 </pre>
@@ -176,16 +126,6 @@ function DateRangePresetsDemo() {
 function DateTimeDemo() {
     const [value, setValue] = useState<number | string | Date | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createDateTimePicker(el, {
-                placeholder: 'Select date and time…',
-                showSeconds: false,
-                onChange: (v) => setValue(v),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -193,7 +133,12 @@ function DateTimeDemo() {
                 <CardDescription>Calendar with time inputs. Combines date and time selection.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <DateTimePicker
+                    placeholder="Select date and time…"
+                    showSeconds={false}
+                    value={value}
+                    onChange={setValue}
+                />
                 <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                     {value != null
                         ? JSON.stringify(
@@ -214,15 +159,6 @@ function DateTimeDemo() {
 function FuzzyDateTimeDemo() {
     const [fuzzy, setFuzzy] = useState<FuzzyDateTime | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createFuzzyDateTimePicker(el, {
-                placeholder: 'Select an approximate date…',
-                onChange: (v) => setFuzzy(v),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -234,7 +170,7 @@ function FuzzyDateTimeDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <FuzzyDateTimePicker placeholder="Select an approximate date…" value={fuzzy} onChange={setFuzzy} />
                 {fuzzy && (
                     <div className="space-y-2">
                         <div className="rounded-lg bg-background p-3 text-center text-sm italic ring-1 ring-border">
@@ -253,16 +189,6 @@ function FuzzyDateTimeDemo() {
 function FuzzyDateTimeInlineDemo() {
     const [fuzzy, setFuzzy] = useState<FuzzyDateTime | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createFuzzyDateTimePicker(el, {
-                inline: true,
-                onChange: (v) => setFuzzy(v),
-                resolutions: ['decade', 'year', 'month', 'day'],
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -274,7 +200,12 @@ function FuzzyDateTimeInlineDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} />
+                <FuzzyDateTimePicker
+                    inline
+                    resolutions={['decade', 'year', 'month', 'day']}
+                    value={fuzzy}
+                    onChange={setFuzzy}
+                />
                 {fuzzy && (
                     <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                         {JSON.stringify(fuzzy, null, 2)}
@@ -288,15 +219,6 @@ function FuzzyDateTimeInlineDemo() {
 function FuzzyCompactDemo() {
     const [fuzzy, setFuzzy] = useState<FuzzyDateTime | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createFuzzyDateTimeCompact(el, {
-                placeholder: 'FuzzyDateTime',
-                onChange: (v) => setFuzzy(v),
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -308,7 +230,12 @@ function FuzzyCompactDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} className="max-w-xs" />
+                <FuzzyDateTimeCompact
+                    placeholder="FuzzyDateTime"
+                    className="max-w-xs"
+                    value={fuzzy}
+                    onChange={setFuzzy}
+                />
                 {fuzzy && (
                     <div className="space-y-2">
                         <div className="rounded-lg bg-background p-3 text-center text-sm italic ring-1 ring-border">
@@ -327,16 +254,6 @@ function FuzzyCompactDemo() {
 function FuzzyCompactInlineDemo() {
     const [fuzzy, setFuzzy] = useState<FuzzyDateTime | null>(null);
 
-    const { ref } = usePickerMount(
-        (el) =>
-            OttaDate.createFuzzyDateTimeCompact(el, {
-                inline: true,
-                onChange: (v) => setFuzzy(v),
-                resolutions: ['year', 'month', 'day'],
-            }),
-        [],
-    );
-
     return (
         <Card>
             <CardHeader>
@@ -346,7 +263,13 @@ function FuzzyCompactInlineDemo() {
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                <div ref={ref} className="max-w-xs" />
+                <FuzzyDateTimeCompact
+                    inline
+                    resolutions={['year', 'month', 'day']}
+                    className="max-w-xs"
+                    value={fuzzy}
+                    onChange={setFuzzy}
+                />
                 {fuzzy && (
                     <pre className="overflow-auto rounded-lg bg-background p-3 font-mono text-xs ring-1 ring-border">
                         {JSON.stringify(fuzzy, null, 2)}
@@ -401,60 +324,49 @@ function FuzzyParseDemo() {
     );
 }
 
-function ProgrammaticApiDemo() {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const pickerRef = useRef<DatePickerInstance | null>(null);
+function ControlledDemo() {
+    const [value, setValue] = useState<number | string | Date | null>(null);
+    const [disabled, setDisabled] = useState(false);
     const [log, setLog] = useState<string[]>([]);
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-        containerRef.current.innerHTML = '';
-        pickerRef.current = OttaDate.createDatePicker(containerRef.current, {
-            onChange: (v) => {
-                setLog((prev) => [...prev.slice(-4), `onChange: ${v}`]);
-            },
-        });
-        return () => {
-            pickerRef.current?.destroy();
-        };
-    }, []);
 
     return (
         <Card>
             <CardHeader>
-                <CardTitle className="text-[0.9375rem] font-semibold">Programmatic API</CardTitle>
-                <CardDescription>Control the picker via JavaScript: open, close, setValue, getValue.</CardDescription>
+                <CardTitle className="text-[0.9375rem] font-semibold">Controlled value</CardTitle>
+                <CardDescription>
+                    The React components are controlled: state outside the picker drives it, and every pick comes back
+                    through onChange.
+                </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="flex items-start gap-4">
-                    <div ref={containerRef} className="flex-1" />
+                    <DatePicker
+                        className="flex-1"
+                        aria-label="Controlled date"
+                        disabled={disabled}
+                        value={value}
+                        onChange={(v) => {
+                            setValue(v);
+                            setLog((prev) => [...prev.slice(-4), `onChange: ${v}`]);
+                        }}
+                    />
                     <div className="flex flex-col gap-2 flex-shrink-0">
-                        <Button variant="outline" size="sm" onClick={() => pickerRef.current?.open()}>
-                            Open
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => pickerRef.current?.close()}>
-                            Close
-                        </Button>
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                                // Set to Jan 1 2025 00:00 UTC
-                                pickerRef.current?.setValue(1735689600);
-                                setLog((prev) => [...prev.slice(-4), 'setValue(1735689600) — Jan 1 2025']);
+                                // Jan 1 2025 00:00 UTC
+                                setValue(1735689600);
+                                setLog((prev) => [...prev.slice(-4), 'value = 1735689600 (Jan 1 2025)']);
                             }}
                         >
                             Set Jan 1, 2025
                         </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                const val = pickerRef.current?.getValue();
-                                setLog((prev) => [...prev.slice(-4), `getValue(): ${val}`]);
-                            }}
-                        >
-                            Get Value
+                        <Button variant="outline" size="sm" onClick={() => setValue(null)}>
+                            Clear
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setDisabled((d) => !d)}>
+                            {disabled ? 'Enable' : 'Disable'}
                         </Button>
                     </div>
                 </div>
@@ -508,8 +420,8 @@ export function OttaDateDemoPage() {
             {/* Type-to-parse */}
             <FuzzyParseDemo />
 
-            {/* Programmatic API */}
-            <ProgrammaticApiDemo />
+            {/* Controlled value */}
+            <ControlledDemo />
         </div>
     );
 }

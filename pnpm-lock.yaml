@@ -2100,9 +2100,30 @@ importers:
         specifier: 'catalog:'
         version: 3.2.0(date-fns@4.1.0)
     devDependencies:
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.7
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.7)
       eslint:
         specifier: 'catalog:'
         version: 9.39.2(jiti@2.7.0)
+      jsdom:
+        specifier: 'catalog:'
+        version: 27.4.0(@noble/hashes@1.8.0)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.4
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.4(react@19.2.4)
       rimraf:
         specifier: 'catalog:'
         version: 6.1.2
@@ -2114,7 +2135,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.1.0)(@vitest/ui@4.0.18)(happy-dom@20.4.0)(jiti@2.7.0)(jsdom@29.0.2(@noble/hashes@1.8.0))(lightningcss@1.32.0)(sugarss@5.0.1(postcss@8.5.31))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.1.0)(@vitest/ui@4.0.18)(happy-dom@20.4.0)(jiti@2.7.0)(jsdom@27.4.0(@noble/hashes@1.8.0))(lightningcss@1.32.0)(sugarss@5.0.1(postcss@8.5.31))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
   packages/ottaeditor:
     dependencies:

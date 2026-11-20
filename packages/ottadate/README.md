@@ -346,6 +346,9 @@ import { createFuzzySelection } from '@ottabase/ottadate/fuzzy';
 // Type-to-parse (no DOM): "early 90s" / "summer 98" → FuzzyDateTime
 import { parseFuzzyInput } from '@ottabase/ottadate/parse';
 
+// Controlled React components (React is an optional peer) — see "React" below
+import { DatePicker, DateRangePicker, DateTimePicker, FuzzyDateTimePicker } from '@ottabase/ottadate/react';
+
 // Stylesheet
 import '@ottabase/ottadate/styles.css';
 ```
@@ -378,35 +381,59 @@ Override any variable on `.ottadate` or a parent element:
 
 Dark mode is automatically supported via `.dark` parent class or `prefers-color-scheme: dark`.
 
-## Usage with React
+## React
 
-The pickers are vanilla JS, so mount them in `useEffect` with a ref:
+`@ottabase/ottadate/react` ships controlled components over the vanilla pickers: `DatePicker`, `DateRangePicker`,
+`DateTimePicker`, `FuzzyDateTimePicker` and `FuzzyDateTimeCompact`. React is an optional peer dependency, so the root
+entry stays framework-agnostic. Import the stylesheet once, anywhere in the app.
 
 ```tsx
-import { useEffect, useRef } from 'react';
-import { OttaDate } from '@ottabase/ottadate';
+import { useState } from 'react';
+import { getDefaultRangePresets, type DateRange, type FuzzyDateTime } from '@ottabase/ottadate';
+import { DatePicker, DateRangePicker, DateTimePicker, FuzzyDateTimePicker } from '@ottabase/ottadate/react';
 import '@ottabase/ottadate/styles.css';
 
-function MyDatePicker({ value, onChange }) {
-    const ref = useRef<HTMLDivElement>(null);
-    const pickerRef = useRef<ReturnType<typeof OttaDate.createDatePicker>>();
+// Build presets once: a new list every render is pushed into the picker every render
+const PRESETS = getDefaultRangePresets();
 
-    useEffect(() => {
-        if (!ref.current) return;
-        pickerRef.current = OttaDate.createDatePicker(ref.current, {
-            value,
-            onChange,
-        });
-        return () => pickerRef.current?.destroy();
-    }, []);
+export function EventForm() {
+    const [due, setDue] = useState<number | string | Date | null>(null); // UTC unix seconds
+    const [startsAt, setStartsAt] = useState<number | string | Date | null>(null);
+    const [range, setRange] = useState<DateRange>({ start: null, end: null });
+    const [happened, setHappened] = useState<FuzzyDateTime | null>(null);
 
-    useEffect(() => {
-        pickerRef.current?.setValue(value);
-    }, [value]);
+    return (
+        <form>
+            <label htmlFor="due">Due date</label>
+            <DatePicker id="due" name="due" placeholder="Pick a date…" value={due} onChange={setDue} />
 
-    return <div ref={ref} />;
+            <DateTimePicker aria-label="Starts at" minuteStep={15} use12Hour value={startsAt} onChange={setStartsAt} />
+
+            <DateRangePicker aria-label="Reporting window" presets={PRESETS} value={range} onChange={setRange} />
+
+            <FuzzyDateTimePicker
+                aria-label="When did it happen?"
+                resolutions={['decade', 'year', 'month', 'day']}
+                value={happened}
+                onChange={setHappened}
+            />
+        </form>
+    );
 }
 ```
+
+- **Props** are the vanilla options (`timezone`, `timestampFormat`, `minDate`, `presets`, `showSeconds`, `resolutions`,
+  …) plus `value`, `onChange`, `className` (wrapper div), `disabled`, `placeholder`, and `id` / `aria-label` /
+  `aria-labelledby` / `aria-describedby` / `aria-invalid` / `aria-required`, which land on the trigger button (on the
+  picker root when `inline`). `name` renders a hidden input carrying `value` (the last pick when uncontrolled) for
+  native form posts (unix/ISO as-is, `Date` as ISO, ranges and fuzzy values as JSON, empty when null).
+- **Controlled.** A changed `value` goes through the instance's `setValue`; the picker is not rebuilt. A parent render
+  that leaves `value` alone does not touch the picker, so a half-picked range survives it. If the parent ignores an
+  `onChange`, the picker snaps back to `value`. Leave `value` out for an uncontrolled picker.
+- **Rebuilds** happen only when an option the picker reads once at creation changes: `timezone`, `inline`, `minDate`,
+  `maxDate`, or `presets` going from none to some. Other option changes go through `setOptions`. A new `onChange`
+  identity never rebuilds.
+- **SSR-safe.** Nothing touches the DOM until the mount effect runs.
 
 ## Nuances
 
