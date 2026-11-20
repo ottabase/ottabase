@@ -9,6 +9,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **`@ottabase/ui` hooks and CopyButton.** `@ottabase/ui/hooks` (also in the barrel): `useClipboard`, `useClickOutside`,
+  `useDebouncedValue`/`useDebouncedCallback`, `useLocalStorage` (JSON, synced across hooks and tabs) with
+  `getStorageValue`/`setStorageValue`, `useHotkeys` with `parseShortcut`, `useMediaQuery`, `useReducedMotion`,
+  `useElementSize`, `useMergedRef`, `useScrollSpy` and `useLatest`. `CopyButton` copies a value with an optional toast.
+  The repo's hand-written copies (menus, data table, spotlight, list searches, copy buttons) use them now.
+- **`@ottabase/ui` inputs.** `NumberInput` (typed freely, clamps on blur, arrow and Shift stepping, prefix, suffix,
+  thousands, a hidden input for `name`), `PasswordInput` (show/hide, optional requirements checklist), `FileInput` (drop
+  zone, size limit, image preview) and `ColorInput` (hex with a picker and swatches); `Textarea` takes `autosize` with
+  `minRows`/`maxRows`. Forms' FormField and the auth, admin and demo pages use them.
+- **`@ottabase/ui` display blocks.** `DataList`, `LoadingOverlay`, `Indicator`, `Highlight`, `ShowMore`, `OverflowList`,
+  `TableOfContents` (scroll spy; docs and legal use it) and `DiffView` (line, field or precomputed diffs; the audit log
+  shows changes with it). Read-only JSON screens show `JsonEditor` in `readOnly` mode. Each block has its own entry, and
+  `/demo/ui` has a Building Blocks section.
+- **`@ottabase/ottadate/react`.** Controlled React components for the date, range, date-time and fuzzy pickers, with a
+  hidden input for `name`. React is an optional peer; the core entry does not import it.
 - **`user.seen`: the bus hears that an account is in use.** A session lasts weeks, so sign-ins say little about who
   still uses the app. `@ottabase/auth` gains `onSession` (called when `GET /session` finds a signed-in user, awaited,
   never able to fail the read), and otta-web uses it to emit `user.seen { userId, email }` at most once an hour per
@@ -437,6 +452,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed (Unreleased)
 
+- **Saved browser settings are JSON.** Every localStorage key otta-web keeps goes through `useLocalStorage` or
+  `setStorageValue`; an unparsable value reads as the default. The referral code and its time are one key,
+  `ottabase.referral` = `{ code, storedAt }`. otta-web's own `useLocalStorage` hook is gone.
+- **`@ottabase/ui` is an optional peer of ottamenu, ui-datatable, docs and legal**, needed only by their rendered
+  entries; ottaselect, ottarenderer and ui-code-highlight depend on it.
 - **A button sizes its icon.** `Button` (`@ottabase/ui`) gives an icon without a size class of its own 16px, as Badge,
   Tabs and Dropdown already did; a bare Lucide icon used to render at its own 24px. An icon with a `size-*` or `h-*`
   class keeps it.
@@ -758,6 +778,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed (Unreleased)
 
+- A range `Slider` shows every thumb (it rendered one whatever its value), with `thumbLabels` to name them, and an
+  indeterminate `Checkbox` shows a dash instead of a check.
 - `@ottabase/ui-cropper` did not type-check in a program that also loads the Workers types (their HTMLRewriter
   `Element.append` hides the DOM's multi-node one); it appends one node at a time.
 - `otta deploy` took a binding name (`"binding": "CACHE_R2"` in otta-cache) or a Durable Object class for a placeholder
