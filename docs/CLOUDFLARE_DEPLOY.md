@@ -6,7 +6,7 @@ Complete guide for deploying `otta-web` to Cloudflare Workers with automated CI/
 
 - Cloudflare account (free tier works)
 - GitHub repository with Actions enabled
-- Node.js 24+ and pnpm 10+ installed locally
+- Node.js 24+ and pnpm 10.27+ installed locally
 
 ## The short way: `otta deploy`
 

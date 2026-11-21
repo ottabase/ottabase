@@ -29,10 +29,6 @@
     "homepage": "https://github.com/ottabase/ottabase#readme",
     "license": "MIT",
     "private": true,
-    "workspaces": [
-        "apps/*",
-        "packages/*"
-    ],
     "ottabase": {
         "//": "The app pnpm dev, dev:fe, dev:be, build, build:app and the cf:* scripts act on, and otta start/dev/build/test/lint/type-check/clean without an app. Override with an app argument or OTTABASE_APP.",
         "defaultApp": "otta-web"
@@ -134,18 +130,9 @@
     "packageManager": "pnpm@10.27.0",
     "engines": {
         "node": ">=24.0.0",
-        "pnpm": ">=10.0.0"
+        "pnpm": ">=10.27.0"
     },
     "lint-staged": {
         "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx,yml,yaml}": "prettier --write"
-    },
-    "pnpm": {
-        "onlyBuiltDependencies": [
-            "@swc/core",
-            "esbuild",
-            "sharp",
-            "unrs-resolver",
-            "workerd"
-        ]
     }
 }

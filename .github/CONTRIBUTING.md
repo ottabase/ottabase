@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Ottabase! This guide will help yo
 ### Prerequisites
 
 - **Node.js** ≥ 24.0.0
-- **pnpm** ≥ 10.0.0 (install via `corepack enable pnpm`)
+- **pnpm** ≥ 10.27.0 (install via `corepack enable pnpm`)
 - A Cloudflare account (free tier works for development)
 
 ### Setup

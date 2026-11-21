@@ -3,6 +3,15 @@ packages:
     - packages/*
     - packages/pro/*
 
+# Dependencies allowed to run their install scripts (native binaries). pnpm 11+ no longer reads the
+# `pnpm` field of package.json and stops the install on a blocked build; 10.27 reads this too.
+allowBuilds:
+    "@swc/core": true
+    esbuild: true
+    sharp: true
+    unrs-resolver: true
+    workerd: true
+
 catalog:
     "@babel/core": ^7.28.6
     "@babel/preset-env": ^7.28.6

@@ -778,6 +778,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed (Unreleased)
 
+- `pnpm install` works on pnpm 11 and later. They no longer read the `pnpm` field of package.json, so the list of
+  dependencies allowed to run install scripts (esbuild, workerd, sharp, @swc/core, unrs-resolver) was ignored and the
+  install stopped with `ERR_PNPM_IGNORED_BUILDS`. The list is `allowBuilds` in `pnpm-workspace.yaml` now, which pnpm
+  10.27 reads too. The root package.json drops its `workspaces` list (pnpm reads only `pnpm-workspace.yaml`'s, and the
+  two had drifted) and requires pnpm 10.27 or later, as QUICKSTART already said.
 - A range `Slider` shows every thumb (it rendered one whatever its value), with `thumbLabels` to name them, and an
   indeterminate `Checkbox` shows a dash instead of a check.
 - `@ottabase/ui-cropper` did not type-check in a program that also loads the Workers types (their HTMLRewriter
