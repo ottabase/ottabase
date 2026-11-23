@@ -31,7 +31,8 @@ vi.mock('../bootstrap', async (importOriginal) => ({
     bootstrapFirstUser: vi.fn(async () => ({ isPlatformOwner: false, organizationId: null })),
 }));
 
-const { getSession, handleAuthRequest, hashPassword, hashToken, resetTwoFactor } = await import('../backend-handler');
+const { getSession, handleAuthRequest, hashPassword, hashToken, isTwoFactorSetupPending, resetTwoFactor } =
+    await import('../backend-handler');
 const { base32Decode, hotp, totpStep } = await import('../totp');
 
 const ORIGIN = 'https://app.example.com';
@@ -419,6 +420,8 @@ describe('a policy that requires two-factor', () => {
         expect(b.hasSession()).toBe(true);
 
         expect(await getSession(b.request('/api/things'), env, options)).toBeNull();
+        // Not signed out: a 401 elsewhere can say why (X-Session-Ended: two-factor-setup).
+        expect(await isTwoFactorSetupPending(b.request('/api/things'), env, options)).toBe(true);
         const session = await getSession(b.request('/api/auth/session'), env, options);
         expect(session?.user).toMatchObject({ twoFactorEnabled: false, twoFactorSetupRequired: true });
 

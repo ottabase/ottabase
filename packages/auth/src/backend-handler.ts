@@ -68,7 +68,7 @@ export { hashPassword, verifyPassword, hashToken } from './crypto';
 export { requireCsrf } from './http';
 export { passkeysAvailable, RECENT_SIGN_IN_MS, resetTwoFactor } from './factors';
 export { completeSignIn, type CompletedSignIn } from './sign-in';
-export { bumpProfileVersion } from './session-store';
+export { bumpProfileVersion, isTwoFactorSetupPending } from './session-store';
 export { bootstrapFirstUser, provisionPlatformOwnerOrganization } from './bootstrap';
 export {
     getSession,

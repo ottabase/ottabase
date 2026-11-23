@@ -16,7 +16,7 @@
 // by mountPackages() and mountPremiumPackages() below.
 // ============================================================
 
-import { wasSessionRevoked } from '@ottabase/auth/backend';
+import { isTwoFactorSetupPending, wasSessionRevoked } from '@ottabase/auth/backend';
 import { handleAnalyticsTrack } from '@ottabase/analytics/server';
 import { mountPackages, runHealth } from '@ottabase/kernel';
 import { Router } from '@ottabase/ottarouter';
@@ -27,6 +27,7 @@ import { APP_ID, getOttabaseConfig } from '../../ottabase/config.loader';
 import { packages } from '../../ottabase/packages';
 import { requireAdminAccess } from '../lib/admin-guard';
 import { buildCorsHeaders, ctxOf, h, makeApiRouteContext, type ApiRouteContext } from '../lib/api-context';
+import { getAuthOptions } from '../lib/auth-utils';
 import { premium } from '../lib/premium';
 import { handleUnhandledRequestError } from '../lib/http-error-boundary';
 import { meSessionRename, meSessionRevoke, meSessionsList, meSessionsRevokeOthers } from './me-sessions';
@@ -456,8 +457,15 @@ export const SESSION_ENDED_HEADER = 'X-Session-Ended';
  * the two KV reads; a missing or expired cookie gets no header and reads as "expired".
  */
 async function markRevokedSession(request: Request, env: CloudflareEnv, response: Response): Promise<Response> {
-    if (!(await wasSessionRevoked(request, env as never))) return response;
+    // A session a two-factor policy confines is not ended: the browser keeps it and sends the
+    // person to /security (`two-factor-setup`), instead of signing them out into a login loop.
+    const reason = (await wasSessionRevoked(request, env as never))
+        ? 'revoked'
+        : (await isTwoFactorSetupPending(request, env as never, getAuthOptions(env)))
+          ? 'two-factor-setup'
+          : null;
+    if (!reason) return response;
     const marked = new Response(response.body, response);
-    marked.headers.set(SESSION_ENDED_HEADER, 'revoked');
+    marked.headers.set(SESSION_ENDED_HEADER, reason);
     return marked;
 }

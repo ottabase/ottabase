@@ -122,7 +122,11 @@ export function reportApiError(error: unknown): void {
 
     // Show different toast styles based on error type
     if (error.isUnauthorized()) {
-        handleUnauthorized(error.response?.headers.get('X-Session-Ended') === 'revoked');
+        const ended = error.response?.headers.get('X-Session-Ended');
+        // Signed in, but a two-factor policy confines the session until it is on: not a sign-out.
+        // The session read says so too, and TwoFactorSetupGate keeps the person on /security.
+        if (ended === 'two-factor-setup') return;
+        handleUnauthorized(ended === 'revoked');
         return;
     }
 

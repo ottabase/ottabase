@@ -64,4 +64,19 @@ describe('reportApiError', () => {
             Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
         }
     });
+
+    it('keeps a session a two-factor policy confines: no sign-out, no trip to /login', () => {
+        const original = window.location;
+        const fake = { pathname: '/admin', href: '/admin' };
+        Object.defineProperty(window, 'location', { value: fake, writable: true, configurable: true });
+        try {
+            globalStore.set(isAuthenticatedAtom, true);
+            const confined = new Response(null, { status: 401, headers: { 'X-Session-Ended': 'two-factor-setup' } });
+            reportApiError(new ApiError({ error: 'Unauthorized', status: 401 }, confined));
+            expect(fake.href).toBe('/admin');
+            expect(globalStore.get(isAuthenticatedAtom)).toBe(true);
+        } finally {
+            Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+        }
+    });
 });

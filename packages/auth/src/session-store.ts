@@ -823,6 +823,21 @@ export async function getSession(
 }
 
 /**
+ * Is this request's session valid but confined until two-factor is on (a policy requires it)?
+ * For the code that answers a 401 elsewhere: such a session is not signed out, and the browser
+ * should send the person to set it up rather than to the login page.
+ */
+export async function isTwoFactorSetupPending(
+    request: Request,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<boolean> {
+    const probe = new Request(new URL('/api/auth/session', request.url), { headers: request.headers });
+    const session = await getSession(probe, env, options);
+    return session?.user.twoFactorSetupRequired === true;
+}
+
+/**
  * Make every live session of a user re-read its snapshot from D1 on its next request (role,
  * profile or factor change). Same key and value the app's own helper writes.
  */

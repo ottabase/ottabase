@@ -213,8 +213,14 @@ provider, which owns its MFA) are not challenged.
 
 **Authenticator app (TOTP).** RFC 6238, SHA-1, six digits, 30 seconds, one step of drift either way. The secret is
 sealed with AES-GCM under a key derived from `AUTH_SECRET`; each accepted step is stored, so a code works once. Turning
-it on hands out ten recovery codes, shown once and stored hashed as single-use `verification_tokens` rows. Five wrong
-codes in fifteen minutes and the challenge answers 429 (counted per person in KV).
+it on hands out ten recovery codes, shown once and stored hashed as single-use `verification_tokens` rows. After five
+wrong codes in fifteen minutes the challenge answers 429 (counted per person in KV). The count is not atomic, so
+requests sent in parallel can each get a try: keep a per-IP rate limit on `/api/auth/two-factor/*` (otta-web's
+`two-factor` bucket does) as the hard bound.
+
+**A session confined until two-factor is on is not signed out.** Off `/api/auth/*` it gets 401s; otta-web marks those
+`X-Session-Ended: two-factor-setup` (`isTwoFactorSetupPending`) so its API client keeps the session and the app stays on
+`/security` instead of sending the person to the login page.
 
 **Passkeys.** WebAuthn with attestation `none`: ES256, RS256 and Ed25519 keys kept as JWKs, user verification required,
 discoverable credentials, a signature counter that may not go backwards. The relying party is the host of `AUTH_URL` and

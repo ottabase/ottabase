@@ -808,6 +808,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed (Unreleased)
 
+- **A session a two-factor policy confines no longer logs the person out.** Its 401s off `/api/auth/*` now carry
+  `X-Session-Ended: two-factor-setup` (new `isTwoFactorSetupPending` in `@ottabase/auth/backend`), and otta-web's API
+  client keeps the session instead of clearing it, so the setup gate can keep the person on `/security` rather than
+  looping through the login page. The wrong-code limit's docs now say what it is: a per-person KV count that parallel
+  requests can outrun, bounded by the per-IP rate limit on the two-factor routes.
 - **`otta add pro` no longer stops at a Pro folder with nothing to wire.** A bundle's members are now the packages that
   carry an `ottabase` descriptor; a tool shipped alongside them (Pro's review action) is left out instead of failing the
   whole add with "has no ottabase descriptor".

@@ -24,9 +24,11 @@
 // answer otherwise is 403 `REAUTH_REQUIRED`, and the app sends the person to sign in again.
 //
 // Codes are guessable in principle (a million of them), so wrong codes and recovery codes are
-// counted per person in KV: five in fifteen minutes and the challenge answers 429 until the window
-// passes. KV is eventually consistent, so a determined attacker across colos may get a few more
-// tries than five, never a meaningful number.
+// counted per person in KV: after five in fifteen minutes the challenge answers 429 until the
+// window passes. The count is a read then a write, not atomic: requests sent in parallel all see
+// the same count, and KV is eventually consistent across colos. The hard bound on parallel guessing
+// is the host's per-IP rate limit on these routes (otta-web's `two-factor` bucket), and every
+// guess needs the pending cookie, which only a correct password, magic link or OAuth sign-in gives.
 //
 // ============================================================
 
