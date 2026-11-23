@@ -2,6 +2,13 @@ import fs from 'fs-extra';
 import path from 'path';
 import { getMonorepoRoot, log, resolveApp } from '../utils/index.js';
 import { readFootprints } from './footprints.js';
+import {
+    planTemplate,
+    readTemplateRecords,
+    serializeTemplateRecords,
+    TEMPLATE_RECORD,
+    type TemplateRecords,
+} from './templates.js';
 
 /**
  * What a package tells the CLI about itself, in its package.json `ottabase` field:
@@ -99,7 +106,11 @@ export interface PackageDescriptor {
 
 export interface AddStep {
     file: string;
-    action: 'create' | 'edit' | 'skip';
+    /**
+     * `update`: a copied template replaced by its new version (no local edits). `merge`: the new
+     * template merged into local edits. `conflict`: merged with conflict markers to resolve.
+     */
+    action: 'create' | 'edit' | 'update' | 'merge' | 'conflict' | 'skip';
     detail: string;
     /** Full content to write for `create`/`edit`; absent for `skip`. */
     content?: string;
@@ -381,36 +392,96 @@ const quote = (value: string) =>
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** The `definePackageClient(...)` entry: bare for a headless package, with its pages otherwise. */
+type AdminPage = NonNullable<PackageDescriptor['adminPages']>[number];
+type PackageRoute = NonNullable<PackageDescriptor['routes']>[number];
+
+function pageEntry(page: AdminPage, eol: string): string {
+    return [
+        '            {',
+        `                path: ${quote(page.path)},`,
+        `                title: ${quote(page.title)},`,
+        ...(page.description ? [`                description: ${quote(page.description)},`] : []),
+        ...(page.icon ? [`                icon: ${page.icon},`] : []),
+        `                group: ${quote(page.group)},`,
+        ...(page.scope ? [`                scope: ${quote(page.scope)},`] : []),
+        ...(page.premium ? ['                premium: true,'] : []),
+        `                load: () => import('@/pages/${page.page}'),`,
+        `                exportName: ${quote(page.export)},`,
+        '            },',
+    ].join(eol);
+}
+
+function routeEntry(route: PackageRoute, eol: string): string {
+    return [
+        '            {',
+        `                path: ${quote(route.path)},`,
+        ...(route.access === 'public' ? ["                access: 'public',"] : []),
+        `                load: () => import('@/pages/${route.page}'),`,
+        `                exportName: ${quote(route.export)},`,
+        ...(route.menu
+            ? [`                menu: { title: ${quote(route.menu.title)}, icon: ${route.menu.icon} },`]
+            : []),
+        '            },',
+    ].join(eol);
+}
+
+/**
+ * Pages and routes a package declares that its existing client entry does not list yet (a page
+ * added in a later release), inserted into that entry. Null when the entry is not in the shape
+ * `otta add` writes (edited by hand): the caller reports what to add instead.
+ */
+function addMissingClientPages(
+    source: string,
+    pkg: PackageDescriptor,
+    missing: { pages: AdminPage[]; routes: PackageRoute[] },
+): string | null {
+    const eol = eolOf(source);
+    const lines = source.split(/\r?\n/);
+    const keyLine = lines.findIndex(
+        (line, index) =>
+            line === `        key: ${quote(pkg.key)},` &&
+            /^\s{4}definePackageClient\(\{\s*$/.test(lines[index - 1] ?? ''),
+    );
+    if (keyLine < 0) {
+        // The bare one-line entry (a package that had no pages when it was added): write the full entry.
+        const bare = lines.findIndex((line) => line === `    definePackageClient({ key: ${quote(pkg.key)} }),`);
+        if (bare < 0) return null;
+        lines.splice(bare, 1, ...clientEntry(pkg, '\n').split('\n'));
+        return lines.join(eol);
+    }
+    const end = lines.findIndex((line, index) => index > keyLine && line === '    }),');
+    if (end < 0) return null;
+    const insertInto = (name: 'adminPages' | 'routes', entries: string[]) => {
+        if (entries.length === 0) return true;
+        const blockEnd = lines.findIndex((line, index) => index > keyLine && line === '    }),');
+        const open = lines.findIndex(
+            (line, index) => index > keyLine && index < blockEnd && line === `        ${name}: [`,
+        );
+        const body = entries.flatMap((entry) => entry.split('\n'));
+        if (open < 0) {
+            lines.splice(keyLine + 1, 0, `        ${name}: [`, ...body, '        ],');
+            return true;
+        }
+        const close = lines.findIndex((line, index) => index > open && index < blockEnd && line === '        ],');
+        if (close < 0) return false;
+        lines.splice(close, 0, ...body);
+        return true;
+    };
+    const routesOk = insertInto(
+        'routes',
+        missing.routes.map((route) => routeEntry(route, '\n')),
+    );
+    const pagesOk = insertInto(
+        'adminPages',
+        missing.pages.map((page) => pageEntry(page, '\n')),
+    );
+    return routesOk && pagesOk ? lines.join(eol) : null;
+}
+
 function clientEntry(pkg: PackageDescriptor, eol: string): string {
     if (!pkg.adminPages && !pkg.routes && !pkg.notices) return `    definePackageClient({ key: ${quote(pkg.key)} }),`;
-    const pages = (pkg.adminPages ?? []).map((page) =>
-        [
-            '            {',
-            `                path: ${quote(page.path)},`,
-            `                title: ${quote(page.title)},`,
-            ...(page.description ? [`                description: ${quote(page.description)},`] : []),
-            ...(page.icon ? [`                icon: ${page.icon},`] : []),
-            `                group: ${quote(page.group)},`,
-            ...(page.scope ? [`                scope: ${quote(page.scope)},`] : []),
-            ...(page.premium ? ['                premium: true,'] : []),
-            `                load: () => import('@/pages/${page.page}'),`,
-            `                exportName: ${quote(page.export)},`,
-            '            },',
-        ].join(eol),
-    );
-    const routes = (pkg.routes ?? []).map((route) =>
-        [
-            '            {',
-            `                path: ${quote(route.path)},`,
-            ...(route.access === 'public' ? ["                access: 'public',"] : []),
-            `                load: () => import('@/pages/${route.page}'),`,
-            `                exportName: ${quote(route.export)},`,
-            ...(route.menu
-                ? [`                menu: { title: ${quote(route.menu.title)}, icon: ${route.menu.icon} },`]
-                : []),
-            '            },',
-        ].join(eol),
-    );
+    const pages = (pkg.adminPages ?? []).map((page) => pageEntry(page, eol));
+    const routes = (pkg.routes ?? []).map((route) => routeEntry(route, eol));
     const notices = Object.entries(pkg.notices ?? {}).map(([code, notice]) =>
         [
             `            ${quote(code)}: {`,
@@ -455,6 +526,24 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
     const rel = (file: string) => path.relative(root, file).split(path.sep).join('/');
     const shippedDir = path.join(root, pkg.dir, 'app');
     const compositionRel = `ottabase/packages/${pkg.key}.ts`;
+    // The templates this app's copies came from (templates.ts): a later template merges into edits.
+    const records: TemplateRecords = readTemplateRecords(appDir);
+    let recordsChanged = false;
+    const templateStep = (relative: string, templateFile: string): AddStep => {
+        const target = path.join(appDir, relative);
+        const { outcome, record } = planTemplate({
+            current: read(target),
+            template: fs.readFileSync(templateFile, 'utf8'),
+            record: records.files[relative],
+            packageKey: pkg.key,
+            source: `${pkg.dir}/app`,
+        });
+        if (record) {
+            records.files[relative] = record;
+            recordsChanged = true;
+        }
+        return { file: rel(target), ...outcome };
+    };
 
     // 1. The dependency.
     const pkgJsonFile = path.join(appDir, 'package.json');
@@ -475,7 +564,10 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
 
     // 2. The composition: shipped with the package, else the reference app's, else a stub.
     const compositionFile = path.join(appDir, compositionRel);
-    if (fs.existsSync(compositionFile)) {
+    const shippedComposition = path.join(shippedDir, compositionRel);
+    if (fs.existsSync(shippedComposition)) {
+        steps.push(templateStep(compositionRel, shippedComposition));
+    } else if (fs.existsSync(compositionFile)) {
         steps.push({ file: rel(compositionFile), action: 'skip', detail: 'composition exists' });
     } else {
         const shipped = read(path.join(shippedDir, compositionRel));
@@ -515,7 +607,34 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
     if (client === null) {
         steps.push({ file: rel(clientFile), action: 'skip', detail: 'no client package list' });
     } else if (new RegExp(`key:\\s*'${pkg.key}'`).test(client)) {
-        steps.push({ file: rel(clientFile), action: 'skip', detail: 'client key present' });
+        // Present: add the pages and routes a later release declares that the entry does not list.
+        const listed = (p: string) => client.includes(`path: ${quote(p)},`);
+        const missing = {
+            pages: (pkg.adminPages ?? []).filter((page) => !listed(page.path)),
+            routes: (pkg.routes ?? []).filter((route) => !listed(route.path)),
+        };
+        const paths = [...missing.pages, ...missing.routes].map((entry) => entry.path);
+        const updated = paths.length > 0 ? addMissingClientPages(client, pkg, missing) : null;
+        if (paths.length === 0) {
+            steps.push({ file: rel(clientFile), action: 'skip', detail: 'client key present' });
+        } else if (updated === null) {
+            steps.push({
+                file: rel(clientFile),
+                action: 'skip',
+                detail: `client key '${pkg.key}' was edited by hand: add ${paths.join(', ')} to it yourself`,
+            });
+        } else {
+            const icons = [
+                ...missing.pages.map((page) => page.icon),
+                ...missing.routes.map((route) => route.menu?.icon),
+            ].filter((icon): icon is string => !!icon);
+            steps.push({
+                file: rel(clientFile),
+                action: 'edit',
+                detail: `add ${paths.join(', ')} to client key '${pkg.key}'`,
+                content: withIcons(updated, icons),
+            });
+        }
     } else {
         const icons = [
             ...(pkg.adminPages ?? []).map((page) => page.icon),
@@ -549,7 +668,31 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
         if (schema === null) {
             steps.push({ file: rel(schemaFile), action: 'skip', detail: 'no ottabase/db/schema.ts' });
         } else if (schema.includes(`from '${pkg.tables.import}'`)) {
-            steps.push({ file: rel(schemaFile), action: 'skip', detail: 'tables re-exported' });
+            // Present: a table a later release adds joins the same export line.
+            const exportLine = new RegExp(
+                `^export \\{ ([^}]*) \\} from '${escapeRegex(pkg.tables.import)}';\\r?$`,
+                'm',
+            );
+            const match = exportLine.exec(schema);
+            const exported = match ? match[1].split(',').map((name) => name.trim()) : [];
+            const missing = pkg.tables.names.filter((name) => !exported.includes(name));
+            if (missing.length === 0) {
+                steps.push({ file: rel(schemaFile), action: 'skip', detail: 'tables re-exported' });
+            } else if (!match) {
+                steps.push({
+                    file: rel(schemaFile),
+                    action: 'skip',
+                    detail: `re-export ${missing.join(', ')} from '${pkg.tables.import}' yourself (the line was edited)`,
+                });
+            } else {
+                const names = [...exported, ...missing].join(', ');
+                steps.push({
+                    file: rel(schemaFile),
+                    action: 'edit',
+                    detail: `re-export ${missing.join(', ')}`,
+                    content: schema.replace(exportLine, `export { ${names} } from '${pkg.tables.import}';`),
+                });
+            }
         } else {
             const updated = insertLine(schema, line, {
                 after: /^export \{ .* \} from '@ottabase\/[a-z0-9-]+\/[a-z-]+';$/,
@@ -563,22 +706,13 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
         }
     }
 
-    // 6. Everything else the package ships for the app (pages, …), copied where the app has no file yet.
+    // 6. Everything else the package ships for the app (pages, …): copied where the app has none,
+    // brought up to the package's new template where it has one (merged into local edits).
     if (fs.existsSync(shippedDir)) {
         for (const file of walk(shippedDir)) {
             const relative = path.relative(shippedDir, file).split(path.sep).join('/');
             if (relative === compositionRel) continue;
-            const target = path.join(appDir, relative);
-            steps.push(
-                fs.existsSync(target)
-                    ? { file: rel(target), action: 'skip', detail: 'exists' }
-                    : {
-                          file: rel(target),
-                          action: 'create',
-                          detail: `copied from ${pkg.dir}/app`,
-                          content: fs.readFileSync(file, 'utf8'),
-                      },
-            );
+            steps.push(templateStep(relative, file));
         }
     }
 
@@ -654,6 +788,17 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
         }
     }
 
+    // 8. The record of the templates this app's copies came from (the base of the next merge).
+    if (recordsChanged) {
+        const recordFile = path.join(appDir, TEMPLATE_RECORD);
+        steps.push({
+            file: rel(recordFile),
+            action: fs.existsSync(recordFile) ? 'edit' : 'create',
+            detail: 'the templates the copies came from (commit it)',
+            content: serializeTemplateRecords(records) ?? '',
+        });
+    }
+
     return { app: appName, appDir, package: pkg, steps };
 }
 
@@ -668,7 +813,7 @@ export function applyAdd(root: string, plan: AddPlan): void {
 
 export function formatAddPlan(plan: AddPlan): string {
     const lines = [`Add ${plan.package.name} (key "${plan.package.key}") to ${plan.app}:`];
-    for (const step of plan.steps) lines.push(`  ${step.action.padEnd(6)} ${step.file}  ${step.detail}`);
+    for (const step of plan.steps) lines.push(`  ${step.action.padEnd(8)} ${step.file}  ${step.detail}`);
     return lines.join('\n');
 }
 
@@ -722,7 +867,16 @@ export async function addPackage(
     }
     log.done(`${what} added to ${app.name}.`);
     log.next('');
-    const next = ['pnpm install', 'pnpm build:pkg'];
+    const conflicts = steps.filter((step) => step.action === 'conflict').map((step) => step.file);
+    const next = [
+        ...(conflicts.length
+            ? [
+                  `Resolve the conflict markers (<<<<<<< yours) in ${conflicts.join(', ')}: your edits against the new template`,
+              ]
+            : []),
+        'pnpm install',
+        'pnpm build:pkg',
+    ];
     const compositions = steps.filter((step) => step.action === 'create' && step.file.includes('/ottabase/packages/'));
     if (compositions.length) next.push(`Review ${compositions.map((step) => step.file).join(', ')}`);
     next.push(`Read ${descriptors.map((pkg) => `${pkg.dir}/README.md`).join(' and ')}: the secrets are yours`);

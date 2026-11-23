@@ -232,7 +232,9 @@ describe('planAdd and applyAdd', () => {
             ['edit', 'apps/bar/ottabase/packages.ts'],
             ['edit', 'apps/bar/src/ottabase/config/packages.ts'],
         ]);
-        expect(formatAddPlan(plan)).toContain('create apps/bar/ottabase/packages/vault.ts  copied from apps/otta-web');
+        expect(formatAddPlan(plan)).toContain(
+            'create   apps/bar/ottabase/packages/vault.ts  copied from apps/otta-web',
+        );
 
         // Nothing is written until applied.
         expect(fs.existsSync(path.join(root, 'apps/bar/ottabase/packages/vault.ts'))).toBe(false);
@@ -281,9 +283,10 @@ describe('planAdd and applyAdd', () => {
             ['edit', 'apps/bar/src/ottabase/config/packages.ts'],
             ['edit', 'apps/bar/ottabase/db/schema.ts'],
             ['create', 'apps/bar/src/pages/admin/infrastructure/TowerPage.tsx'],
+            ['create', 'apps/bar/.ottabase-templates.json'],
         ]);
         expect(formatAddPlan(plan)).toContain(
-            'create apps/bar/ottabase/packages/tower.ts  copied from packages/pro/tower/app',
+            'create   apps/bar/ottabase/packages/tower.ts  copied from packages/pro/tower/app',
         );
         applyAdd(root, plan);
 
@@ -502,5 +505,99 @@ describe('routes and the error reporter', () => {
         const main = text(root, 'apps/bar/src/main.tsx');
         expect(main.match(/import \{ report \}/g)).toHaveLength(1);
         expect(main.match(/<ErrorBoundary onError=\{\(error\) => report\(error\)\}>/g)).toHaveLength(2);
+    });
+});
+
+describe('a later release of an added package', () => {
+    const PAGE = 'apps/bar/src/pages/admin/infrastructure/TowerPage.tsx';
+    const TEMPLATE = 'packages/pro/tower/app/src/pages/admin/infrastructure/TowerPage.tsx';
+
+    function addedTower() {
+        const root = fixture();
+        applyAdd(root, planAdd(root, 'bar', readPackageDescriptor(root, 'tower')));
+        return root;
+    }
+    const again = (root: string) => planAdd(root, 'bar', readPackageDescriptor(root, 'tower'));
+    const stepFor = (plan: ReturnType<typeof planAdd>, file: string) => plan.steps.find((step) => step.file === file)!;
+    const release = (root: string, file: string, content: string) => fs.outputFileSync(path.join(root, file), content);
+
+    it('replaces an untouched copy with the new template', () => {
+        const root = addedTower();
+        release(root, TEMPLATE, 'export function TowerPage() {\n    return "v2";\n}\n');
+        const plan = again(root);
+        expect(stepFor(plan, PAGE).action).toBe('update');
+        applyAdd(root, plan);
+        expect(text(root, PAGE)).toContain('"v2"');
+        expect(again(root).steps.every((step) => step.action === 'skip')).toBe(true);
+    });
+
+    it('merges the new template into local edits on other lines', () => {
+        const root = addedTower();
+        release(root, TEMPLATE, '// Tower board\nexport function TowerPage() {\n    return null;\n}\n');
+        fs.outputFileSync(
+            path.join(root, PAGE),
+            'export function TowerPage() {\n    return null;\n}\n// my own note\n',
+        );
+        const plan = again(root);
+        expect(stepFor(plan, PAGE).action).toBe('merge');
+        applyAdd(root, plan);
+        expect(text(root, PAGE)).toBe(
+            '// Tower board\nexport function TowerPage() {\n    return null;\n}\n// my own note\n',
+        );
+    });
+
+    it('writes conflict markers when both changed the same line, and says so', () => {
+        const root = addedTower();
+        release(root, TEMPLATE, 'export function TowerPage() {\n    return "theirs";\n}\n');
+        fs.outputFileSync(path.join(root, PAGE), 'export function TowerPage() {\n    return "mine";\n}\n');
+        const plan = again(root);
+        expect(stepFor(plan, PAGE).action).toBe('conflict');
+        applyAdd(root, plan);
+        const merged = text(root, PAGE);
+        expect(merged).toContain('<<<<<<< yours');
+        expect(merged).toContain('"mine"');
+        expect(merged).toContain('"theirs"');
+    });
+
+    it('leaves a copy made before templates were recorded alone when it differs', () => {
+        const root = addedTower();
+        fs.removeSync(path.join(root, 'apps/bar/.ottabase-templates.json'));
+        fs.outputFileSync(path.join(root, PAGE), 'export function TowerPage() {\n    return "edited";\n}\n');
+        const step = stepFor(again(root), PAGE);
+        expect(step.action).toBe('skip');
+        expect(step.detail).toContain('compare it by hand');
+    });
+
+    it('wires a page and a table the release adds to the existing entries', () => {
+        const root = addedTower();
+        const file = path.join(root, 'packages/pro/tower/package.json');
+        const pkg = fs.readJsonSync(file);
+        pkg.ottabase.tables.names.push('towerChecksTable');
+        pkg.ottabase.adminPages.push({
+            path: '/admin/infrastructure/tower/history',
+            title: 'Tower history',
+            icon: 'History',
+            group: 'infrastructure',
+            scope: 'platform',
+            page: 'admin/infrastructure/TowerHistoryPage',
+            export: 'TowerHistoryPage',
+        });
+        fs.writeJsonSync(file, pkg);
+        const plan = again(root);
+        expect(stepFor(plan, 'apps/bar/src/ottabase/config/packages.ts')).toMatchObject({
+            action: 'edit',
+            detail: "add /admin/infrastructure/tower/history to client key 'tower'",
+        });
+        expect(stepFor(plan, 'apps/bar/ottabase/db/schema.ts').action).toBe('edit');
+        applyAdd(root, plan);
+        const client = text(root, 'apps/bar/src/ottabase/config/packages.ts');
+        expect(client).toContain(
+            "exportName: 'TowerPage',\n            },\n            {\n                path: '/admin/infrastructure/tower/history',",
+        );
+        expect(client).toContain("import { History, Radar } from 'lucide-react';");
+        expect(text(root, 'apps/bar/ottabase/db/schema.ts')).toContain(
+            "export { towerAppsTable, towerChecksTable } from '@ottabase/tower/schema';",
+        );
+        expect(again(root).steps.every((step) => step.action === 'skip')).toBe(true);
     });
 });

@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **`otta add` brings a package's later release into an app without losing its edits.** It records the template each
+  copied `app/` file came from (`apps/<app>/.ottabase-templates.json`) and, on the next add: replaces an untouched copy
+  with the new template, merges the template's changes into an edited copy with `git merge-file`, or writes conflict
+  markers where both changed the same lines (and says so). Pages and routes a release adds are inserted into the
+  package's existing client entry, and new tables join its schema re-export line, where both used to be skipped.
+  `otta strip` forgets the stripped packages' templates.
 - **Typed endpoints: one declaration for both sides of a custom route.** `@ottabase/utils/endpoint` gives
   `defineEndpoint({ method, path, input, output: returns<T>() })`; the path's `:params`, the input (any `parse` /
   `safeParse` parser, zod included) and the response are typed from that value, with no codegen. The Worker serves it

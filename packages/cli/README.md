@@ -126,7 +126,8 @@ A package with a user interface can say more, and `otta add` writes that too:
 - `adminPages`: entries for the client descriptor (path, title, icon, group, page module, export). otta-web's groups are
   `customers`, `observe`, `content`, `growth`, `infrastructure`, `access`, `security` and `appearance`.
 - An `app/` folder mirroring the app layout (`app/ottabase/packages/<key>.ts`, `app/src/pages/…`): copied in where the
-  app has no such file yet. A shipped composition wins over the reference app's.
+  app has no such file yet. A shipped composition wins over the reference app's. The copies are yours to edit; see
+  "Later releases" below for how a new template reaches an edited copy.
 - `routes`: the package's other SPA pages, written into the client descriptor next to `adminPages`; the app router
   mounts them from there.
   `{ "path": "/status", "page": "status/StatusPage", "export": "StatusPage", "access": "public" }` (`access` defaults to
@@ -137,6 +138,20 @@ A package with a user interface can say more, and `otta add` writes that too:
 - `notices`: `{ "checkout-complete": { "type": "success", "message": "You're in.", "inline": true } }` adds the URL
   notices the package redirects with to its client descriptor; the app registry names them `<key>.<code>`. Codes are
   kebab-case; `type` is success, info, warning or error.
+
+#### Later releases
+
+Run `otta add` again after pulling a newer package (`otta pro update` does): it adds what the release adds and keeps
+your edits.
+
+- **Copied templates.** `apps/<app>/.ottabase-templates.json` records the template each `app/` file was copied from
+  (commit it). Template unchanged: nothing happens. Your copy unchanged: it becomes the new template (`update`). Both
+  changed: the template's changes are merged into your edits with `git merge-file` (`merge`); where both changed the
+  same lines, the file gets conflict markers (`<<<<<<< yours`) and the plan says `conflict`. A copy made before the
+  record existed is recorded when it still equals the template and left alone (with a note) when it does not.
+- **New pages and routes** a release declares are inserted into the package's existing client entry; an entry edited by
+  hand out of shape is left alone and the plan names the paths to add.
+- **New tables** join the package's existing re-export line in `ottabase/db/schema.ts`.
 
 A boundary that already has an `onError` is left alone and the plan says what to do by hand. Two packages routing one
 path, or a package routing a path the app owns, stop the app at boot with both names. `page` is a module path under
@@ -229,10 +244,11 @@ pnpm otta pro update --dry-run
 ```
 
 Pro lives at `packages/pro` as a git subtree. The command runs `git subtree pull --squash` for the tag (the tree must be
-clean), `otta add pro <app>` for anything the release adds (never overwriting what the app has), and prints the
-release's `CHANGELOG.md` entry, with a warning when it names a newer public Ottabase than this repository may have. Then
-`pnpm install && pnpm build:pkg`, the gates, the migrations in each environment, and a commit. In a repo that keeps
-`.ottabase-upstream.json` (the `ottabase-update` skill's record) the command also sets `pro` there to the pulled tag.
+clean), `otta add pro <app>` for anything the release adds (new templates merged into your edits, see "Later releases"),
+and prints the release's `CHANGELOG.md` entry, with a warning when it names a newer public Ottabase than this repository
+may have. Then `pnpm install && pnpm build:pkg`, the gates, the migrations in each environment, and a commit. In a repo
+that keeps `.ottabase-upstream.json` (the `ottabase-update` skill's record) the command also sets `pro` there to the
+pulled tag.
 
 ### Starting apps and environments
 

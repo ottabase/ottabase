@@ -475,6 +475,22 @@ describe('planStrip', () => {
         expect(again.steps.every((step) => step.action === 'skip')).toBe(true);
     });
 
+    it('forgets the copied templates of the stripped packages and keeps the rest', () => {
+        const root = fixture();
+        const record = {
+            version: 1,
+            files: {
+                'ottabase/packages/ottablog.ts': { package: 'ottablog', base: 'x' },
+                'src/pages/Other.tsx': { package: 'other', base: 'y' },
+            },
+        };
+        fs.outputJsonSync(path.join(root, 'apps/otta-web/.ottabase-templates.json'), record);
+        applyStrip(root, planStrip(root, 'otta-web', ['ottablog']));
+        expect(fs.readJsonSync(path.join(root, 'apps/otta-web/.ottabase-templates.json')).files).toEqual({
+            'src/pages/Other.tsx': { package: 'other', base: 'y' },
+        });
+    });
+
     it('strips the demo: a footprint-only key with its own dependency and an unless block', () => {
         const root = fixture();
         applyStrip(root, planStrip(root, 'otta-web', ['demo']));

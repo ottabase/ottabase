@@ -3,6 +3,7 @@ import path from 'path';
 import { getMonorepoRoot, log, resolveApp } from '../utils/index.js';
 import { findPackageDescriptor, type PackageDescriptor } from './add.js';
 import { FOOTPRINTS_FILE, PACKAGE_KEY, readFootprints, stripClosure, type Footprints } from './footprints.js';
+import { readTemplateRecords, serializeTemplateRecords, TEMPLATE_RECORD } from './templates.js';
 
 /**
  * `otta strip <demo|package…> [app]`: the inverse of `otta add`.
@@ -347,6 +348,18 @@ export function planStrip(root: string, appName: string, requested: string[]): S
         const rest = Object.fromEntries(Object.entries(footprints).filter(([key]) => !stripped.has(key)));
         const eol = eolOf(fs.readFileSync(footprintsFile, 'utf8'));
         edit(footprintsFile, `forget ${forgotten.join(', ')}`, JSON.stringify(rest, null, 4).replace(/\n/g, eol) + eol);
+    }
+
+    // The template record forgets the copies of the stripped packages (add.ts, templates.ts).
+    const records = readTemplateRecords(appDir);
+    const kept = Object.fromEntries(
+        Object.entries(records.files).filter(([, record]) => !stripped.has(record.package)),
+    );
+    if (Object.keys(kept).length !== Object.keys(records.files).length) {
+        const recordFile = path.join(appDir, TEMPLATE_RECORD);
+        const content = serializeTemplateRecords({ version: 1, files: kept });
+        if (content === null) remove(recordFile, 'no copied templates left');
+        else edit(recordFile, `forget the templates of ${keys.join(', ')}`, content);
     }
 
     return { app: appName, appDir, keys, steps };
