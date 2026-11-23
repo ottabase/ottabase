@@ -3,6 +3,7 @@ import path from 'path';
 import { getMonorepoRoot, log, resolveApp } from '../utils/index.js';
 import { readFootprints } from './footprints.js';
 import {
+    lf,
     planTemplate,
     readTemplateRecords,
     serializeTemplateRecords,
@@ -109,8 +110,9 @@ export interface AddStep {
     /**
      * `update`: a copied template replaced by its new version (no local edits). `merge`: the new
      * template merged into local edits. `conflict`: merged with conflict markers to resolve.
+     * `delete`: an unedited copy of a template the package no longer ships.
      */
-    action: 'create' | 'edit' | 'update' | 'merge' | 'conflict' | 'skip';
+    action: 'create' | 'edit' | 'update' | 'merge' | 'conflict' | 'delete' | 'skip';
     detail: string;
     /** Full content to write for `create`/`edit`; absent for `skip`. */
     content?: string;
@@ -430,18 +432,45 @@ function routeEntry(route: PackageRoute, eol: string): string {
  * added in a later release), inserted into that entry. Null when the entry is not in the shape
  * `otta add` writes (edited by hand): the caller reports what to add instead.
  */
+/** The line of this package's `key:` inside a `definePackageClient({` entry in the shape `otta add` writes; -1 when none. */
+function clientKeyLine(lines: string[], key: string): number {
+    return lines.findIndex(
+        (line, index) =>
+            line === `        key: ${quote(key)},` && /^\s{4}definePackageClient\(\{\s*$/.test(lines[index - 1] ?? ''),
+    );
+}
+
+/** This package's client entry (the multi-line block or the bare one-liner); null when hand-formatted. */
+function clientBlock(source: string, key: string): string | null {
+    const lines = source.split(/\r?\n/);
+    const keyLine = clientKeyLine(lines, key);
+    if (keyLine < 0) {
+        const bare = lines.find((line) => line === `    definePackageClient({ key: ${quote(key)} }),`);
+        return bare ?? null;
+    }
+    const end = lines.findIndex((line, index) => index > keyLine && line === '    }),');
+    return end < 0 ? null : lines.slice(keyLine - 1, end + 1).join('\n');
+}
+
+function noticeEntry(code: string, notice: NoticeDescriptor, eol: string): string {
+    return [
+        `            ${quote(code)}: {`,
+        `                type: ${quote(notice.type)},`,
+        ...(notice.title ? [`                title: ${quote(notice.title)},`] : []),
+        `                message: ${quote(notice.message)},`,
+        ...(notice.inline ? ['                inline: true,'] : []),
+        '            },',
+    ].join(eol);
+}
+
 function addMissingClientPages(
     source: string,
     pkg: PackageDescriptor,
-    missing: { pages: AdminPage[]; routes: PackageRoute[] },
+    missing: { pages: AdminPage[]; routes: PackageRoute[]; notices: [string, NoticeDescriptor][] },
 ): string | null {
     const eol = eolOf(source);
     const lines = source.split(/\r?\n/);
-    const keyLine = lines.findIndex(
-        (line, index) =>
-            line === `        key: ${quote(pkg.key)},` &&
-            /^\s{4}definePackageClient\(\{\s*$/.test(lines[index - 1] ?? ''),
-    );
+    const keyLine = clientKeyLine(lines, pkg.key);
     if (keyLine < 0) {
         // The bare one-line entry (a package that had no pages when it was added): write the full entry.
         const bare = lines.findIndex((line) => line === `    definePackageClient({ key: ${quote(pkg.key)} }),`);
@@ -451,18 +480,24 @@ function addMissingClientPages(
     }
     const end = lines.findIndex((line, index) => index > keyLine && line === '    }),');
     if (end < 0) return null;
-    const insertInto = (name: 'adminPages' | 'routes', entries: string[]) => {
+    // `adminPages: [ ... ],`, `routes: [ ... ],` and `notices: { ... },` inside the entry: appended to
+    // the list when it exists, else the list is opened (arrays after the key, notices last).
+    const insertInto = (name: 'adminPages' | 'routes' | 'notices', entries: string[]) => {
         if (entries.length === 0) return true;
+        const [opening, closing] = name === 'notices' ? ['{', '}'] : ['[', ']'];
         const blockEnd = lines.findIndex((line, index) => index > keyLine && line === '    }),');
         const open = lines.findIndex(
-            (line, index) => index > keyLine && index < blockEnd && line === `        ${name}: [`,
+            (line, index) => index > keyLine && index < blockEnd && line === `        ${name}: ${opening}`,
         );
         const body = entries.flatMap((entry) => entry.split('\n'));
         if (open < 0) {
-            lines.splice(keyLine + 1, 0, `        ${name}: [`, ...body, '        ],');
+            const at = name === 'notices' ? blockEnd : keyLine + 1;
+            lines.splice(at, 0, `        ${name}: ${opening}`, ...body, `        ${closing},`);
             return true;
         }
-        const close = lines.findIndex((line, index) => index > open && index < blockEnd && line === '        ],');
+        const close = lines.findIndex(
+            (line, index) => index > open && index < blockEnd && line === `        ${closing},`,
+        );
         if (close < 0) return false;
         lines.splice(close, 0, ...body);
         return true;
@@ -475,23 +510,18 @@ function addMissingClientPages(
         'adminPages',
         missing.pages.map((page) => pageEntry(page, '\n')),
     );
-    return routesOk && pagesOk ? lines.join(eol) : null;
+    const noticesOk = insertInto(
+        'notices',
+        missing.notices.map(([code, notice]) => noticeEntry(code, notice, '\n')),
+    );
+    return routesOk && pagesOk && noticesOk ? lines.join(eol) : null;
 }
 
 function clientEntry(pkg: PackageDescriptor, eol: string): string {
     if (!pkg.adminPages && !pkg.routes && !pkg.notices) return `    definePackageClient({ key: ${quote(pkg.key)} }),`;
     const pages = (pkg.adminPages ?? []).map((page) => pageEntry(page, eol));
     const routes = (pkg.routes ?? []).map((route) => routeEntry(route, eol));
-    const notices = Object.entries(pkg.notices ?? {}).map(([code, notice]) =>
-        [
-            `            ${quote(code)}: {`,
-            `                type: ${quote(notice.type)},`,
-            ...(notice.title ? [`                title: ${quote(notice.title)},`] : []),
-            `                message: ${quote(notice.message)},`,
-            ...(notice.inline ? ['                inline: true,'] : []),
-            '            },',
-        ].join(eol),
-    );
+    const notices = Object.entries(pkg.notices ?? {}).map(([code, notice]) => noticeEntry(code, notice, eol));
     return [
         '    definePackageClient({',
         `        key: ${quote(pkg.key)},`,
@@ -607,13 +637,20 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
     if (client === null) {
         steps.push({ file: rel(clientFile), action: 'skip', detail: 'no client package list' });
     } else if (new RegExp(`key:\\s*'${pkg.key}'`).test(client)) {
-        // Present: add the pages and routes a later release declares that the entry does not list.
-        const listed = (p: string) => client.includes(`path: ${quote(p)},`);
+        // Present: add the pages, routes and notices a later release declares that THIS package's
+        // entry does not list (another package listing the same path does not count). A
+        // hand-formatted entry is searched for in the whole file, so a complete one does not nag.
+        const scope = clientBlock(client, pkg.key) ?? client;
+        const listed = (p: string) => scope.includes(`path: ${quote(p)},`);
         const missing = {
             pages: (pkg.adminPages ?? []).filter((page) => !listed(page.path)),
             routes: (pkg.routes ?? []).filter((route) => !listed(route.path)),
+            notices: Object.entries(pkg.notices ?? {}).filter(([code]) => !scope.includes(`${quote(code)}: {`)),
         };
-        const paths = [...missing.pages, ...missing.routes].map((entry) => entry.path);
+        const paths = [
+            ...[...missing.pages, ...missing.routes].map((entry) => entry.path),
+            ...missing.notices.map(([code]) => `notice ${code}`),
+        ];
         const updated = paths.length > 0 ? addMissingClientPages(client, pkg, missing) : null;
         if (paths.length === 0) {
             steps.push({ file: rel(clientFile), action: 'skip', detail: 'client key present' });
@@ -669,13 +706,23 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
             steps.push({ file: rel(schemaFile), action: 'skip', detail: 'no ottabase/db/schema.ts' });
         } else if (schema.includes(`from '${pkg.tables.import}'`)) {
             // Present: a table a later release adds joins the same export line.
+            // The line's own \r is captured and put back, so a CRLF file stays uniformly CRLF.
             const exportLine = new RegExp(
-                `^export \\{ ([^}]*) \\} from '${escapeRegex(pkg.tables.import)}';\\r?$`,
+                `^export \\{ ([^}]*) \\} from '${escapeRegex(pkg.tables.import)}';(\\r?)$`,
                 'm',
             );
             const match = exportLine.exec(schema);
             const exported = match ? match[1].split(',').map((name) => name.trim()) : [];
-            const missing = pkg.tables.names.filter((name) => !exported.includes(name));
+            // An export spread over several lines does not match: a name counts as exported when any
+            // export statement from this import names it.
+            const statements = schema.match(
+                new RegExp(`export\\s*\\{[^}]*\\}\\s*from\\s*'${escapeRegex(pkg.tables.import)}'`, 'g'),
+            );
+            const named = (name: string) =>
+                match
+                    ? exported.includes(name)
+                    : (statements ?? []).some((text) => new RegExp(`\\b${escapeRegex(name)}\\b`).test(text));
+            const missing = pkg.tables.names.filter((name) => !named(name));
             if (missing.length === 0) {
                 steps.push({ file: rel(schemaFile), action: 'skip', detail: 'tables re-exported' });
             } else if (!match) {
@@ -686,11 +733,15 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
                 });
             } else {
                 const names = [...exported, ...missing].join(', ');
+                const from = pkg.tables.import;
                 steps.push({
                     file: rel(schemaFile),
                     action: 'edit',
                     detail: `re-export ${missing.join(', ')}`,
-                    content: schema.replace(exportLine, `export { ${names} } from '${pkg.tables.import}';`),
+                    content: schema.replace(
+                        exportLine,
+                        (_line, _names, cr: string) => `export { ${names} } from '${from}';${cr}`,
+                    ),
                 });
             }
         } else {
@@ -714,6 +765,27 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
             if (relative === compositionRel) continue;
             steps.push(templateStep(relative, file));
         }
+    }
+
+    // 6a. A template this package no longer ships: an unedited copy goes with it, an edited one is
+    // flagged. Either way the record forgets it (there is no template left to merge from).
+    for (const [relative, record] of Object.entries(records.files)) {
+        if (record.package !== pkg.key || fs.existsSync(path.join(shippedDir, relative))) continue;
+        delete records.files[relative];
+        recordsChanged = true;
+        const target = path.join(appDir, relative);
+        const copy = read(target);
+        // The composition stays: the package list imports it (step 2 reported it as the app's own now).
+        if (copy === null || relative === compositionRel) continue;
+        steps.push(
+            lf(copy) === record.base
+                ? {
+                      file: rel(target),
+                      action: 'delete',
+                      detail: `removed upstream from ${pkg.dir}/app (no local edits)`,
+                  }
+                : { file: rel(target), action: 'skip', detail: 'removed upstream: review it' },
+        );
     }
 
     // 6b. A public package ships no app/ folder: its pages live in the reference app, listed in that
@@ -791,12 +863,17 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
     // 8. The record of the templates this app's copies came from (the base of the next merge).
     if (recordsChanged) {
         const recordFile = path.join(appDir, TEMPLATE_RECORD);
-        steps.push({
-            file: rel(recordFile),
-            action: fs.existsSync(recordFile) ? 'edit' : 'create',
-            detail: 'the templates the copies came from (commit it)',
-            content: serializeTemplateRecords(records) ?? '',
-        });
+        const content = serializeTemplateRecords(records);
+        if (content !== null) {
+            steps.push({
+                file: rel(recordFile),
+                action: fs.existsSync(recordFile) ? 'edit' : 'create',
+                detail: 'the templates the copies came from (commit it)',
+                content,
+            });
+        } else if (fs.existsSync(recordFile)) {
+            steps.push({ file: rel(recordFile), action: 'delete', detail: 'no copied templates left' });
+        }
     }
 
     return { app: appName, appDir, package: pkg, steps };
@@ -804,11 +881,23 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
 
 export function applyAdd(root: string, plan: AddPlan): void {
     for (const step of plan.steps) {
-        if (step.action === 'skip' || step.content === undefined) continue;
         const file = path.join(root, step.file);
+        if (step.action === 'delete') {
+            fs.removeSync(file);
+            continue;
+        }
+        if (step.action === 'skip' || step.content === undefined) continue;
         fs.ensureDirSync(path.dirname(file));
         fs.writeFileSync(file, step.content);
     }
+}
+
+/**
+ * Did the plans wire anything? The template record alone does not count: an app whose copies
+ * predate the record and still equal the templates gets one written, and is still "already wired".
+ */
+export function wiredSomething(steps: AddStep[]): boolean {
+    return steps.some((step) => step.action !== 'skip' && path.posix.basename(step.file) !== TEMPLATE_RECORD);
 }
 
 export function formatAddPlan(plan: AddPlan): string {
@@ -861,7 +950,7 @@ export async function addPackage(
     const what = descriptors.map((pkg) => pkg.name).join(', ');
     // The exit words of the design system: Done. (green) then Next: (amber) with the fix.
     console.log('');
-    if (!steps.some((step) => step.action !== 'skip')) {
+    if (!wiredSomething(steps)) {
         log.done(`${what} already wired into ${app.name}.`);
         return plans;
     }

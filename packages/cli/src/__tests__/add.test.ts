@@ -2,7 +2,15 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { addPackages, applyAdd, formatAddPlan, listBundle, planAdd, readPackageDescriptor } from '../commands/add.js';
+import {
+    addPackages,
+    applyAdd,
+    formatAddPlan,
+    listBundle,
+    planAdd,
+    readPackageDescriptor,
+    wiredSomething,
+} from '../commands/add.js';
 
 const roots: string[] = [];
 
@@ -599,5 +607,164 @@ describe('a later release of an added package', () => {
             "export { towerAppsTable, towerChecksTable } from '@ottabase/tower/schema';",
         );
         expect(again(root).steps.every((step) => step.action === 'skip')).toBe(true);
+    });
+
+    const RECORD = 'apps/bar/.ottabase-templates.json';
+    const recordOf = (root: string) => fs.readJsonSync(path.join(root, RECORD)).files as Record<string, unknown>;
+
+    it('leaves the copy and the record alone when git cannot merge (a binary copy)', () => {
+        const root = addedTower();
+        const before = recordOf(root);
+        release(root, TEMPLATE, 'export function TowerPage() {\n    return "v2";\n}\n');
+        const binary = 'export function TowerPage() {\0\n    return "mine";\n}\n';
+        fs.outputFileSync(path.join(root, PAGE), binary);
+        const plan = again(root);
+        const step = stepFor(plan, PAGE);
+        expect(step.action).toBe('skip');
+        expect(step.detail).toContain('could not merge:');
+        expect(plan.steps.some((s) => s.file === RECORD)).toBe(false);
+        applyAdd(root, plan);
+        expect(text(root, PAGE)).toBe(binary);
+        expect(recordOf(root)).toEqual(before);
+    });
+
+    it('skips an edited copy when git is not installed', () => {
+        const root = addedTower();
+        release(root, TEMPLATE, 'export function TowerPage() {\n    return "v2";\n}\n');
+        fs.outputFileSync(path.join(root, PAGE), 'export function TowerPage() {\n    return "mine";\n}\n');
+        const saved = process.env.PATH;
+        process.env.PATH = '';
+        try {
+            const step = stepFor(again(root), PAGE);
+            expect(step.action).toBe('skip');
+            expect(step.detail).toContain('install git');
+        } finally {
+            process.env.PATH = saved;
+        }
+    });
+
+    it('deletes an unedited copy of a template removed upstream, flags an edited one, and forgets both', () => {
+        const root = addedTower();
+        fs.removeSync(path.join(root, TEMPLATE));
+        const plan = again(root);
+        expect(stepFor(plan, PAGE).action).toBe('delete');
+        applyAdd(root, plan);
+        expect(fs.existsSync(path.join(root, PAGE))).toBe(false);
+        expect(Object.keys(recordOf(root))).toEqual(['ottabase/packages/tower.ts']);
+
+        const edited = addedTower();
+        fs.removeSync(path.join(edited, TEMPLATE));
+        fs.outputFileSync(path.join(edited, PAGE), 'export function TowerPage() {\n    return "mine";\n}\n');
+        const step = stepFor(again(edited), PAGE);
+        expect(step).toMatchObject({ action: 'skip', detail: 'removed upstream: review it' });
+        applyAdd(edited, again(edited));
+        expect(text(edited, PAGE)).toContain('"mine"');
+        expect(Object.keys(recordOf(edited))).toEqual(['ottabase/packages/tower.ts']);
+    });
+
+    it('keeps a CRLF schema uniformly CRLF when a table joins the export line', () => {
+        const root = addedTower();
+        const schemaFile = path.join(root, 'apps/bar/ottabase/db/schema.ts');
+        fs.writeFileSync(schemaFile, fs.readFileSync(schemaFile, 'utf8').replace(/\n/g, '\r\n'));
+        const file = path.join(root, 'packages/pro/tower/package.json');
+        const pkg = fs.readJsonSync(file);
+        pkg.ottabase.tables.names.push('towerChecksTable');
+        fs.writeJsonSync(file, pkg);
+        applyAdd(root, again(root));
+        const schema = fs.readFileSync(schemaFile, 'utf8');
+        expect(schema).toContain("export { towerAppsTable, towerChecksTable } from '@ottabase/tower/schema';\r\n");
+        expect(schema.replace(/\r\n/g, '')).not.toContain('\n');
+    });
+
+    it('names only the tables really missing from a multi-line export', () => {
+        const root = addedTower();
+        const schemaFile = path.join(root, 'apps/bar/ottabase/db/schema.ts');
+        fs.writeFileSync(
+            schemaFile,
+            fs
+                .readFileSync(schemaFile, 'utf8')
+                .replace(
+                    "export { towerAppsTable } from '@ottabase/tower/schema';",
+                    "export {\n    towerAppsTable,\n} from '@ottabase/tower/schema';",
+                ),
+        );
+        expect(stepFor(again(root), 'apps/bar/ottabase/db/schema.ts')).toMatchObject({
+            action: 'skip',
+            detail: 'tables re-exported',
+        });
+        const file = path.join(root, 'packages/pro/tower/package.json');
+        const pkg = fs.readJsonSync(file);
+        pkg.ottabase.tables.names.push('towerChecksTable');
+        fs.writeJsonSync(file, pkg);
+        const step = stepFor(again(root), 'apps/bar/ottabase/db/schema.ts');
+        expect(step.action).toBe('skip');
+        expect(step.detail).toContain('re-export towerChecksTable from');
+        expect(step.detail).not.toContain('towerAppsTable');
+    });
+
+    it("looks for a page only in this package's own client entry", () => {
+        const root = addedTower();
+        const clientFile = path.join(root, 'apps/bar/src/ottabase/config/packages.ts');
+        // Another package's entry lists the same path: tower's own entry still lacks it.
+        fs.writeFileSync(
+            clientFile,
+            fs
+                .readFileSync(clientFile, 'utf8')
+                .replace(
+                    "    definePackageClient({ key: 'core' }),",
+                    "    definePackageClient({\n        key: 'core',\n        adminPages: [\n            {\n                path: '/admin/infrastructure/tower/history',\n            },\n        ],\n    }),",
+                ),
+        );
+        const file = path.join(root, 'packages/pro/tower/package.json');
+        const pkg = fs.readJsonSync(file);
+        pkg.ottabase.adminPages.push({
+            path: '/admin/infrastructure/tower/history',
+            title: 'Tower history',
+            group: 'infrastructure',
+            page: 'admin/infrastructure/TowerHistoryPage',
+            export: 'TowerHistoryPage',
+        });
+        fs.writeJsonSync(file, pkg);
+        expect(stepFor(again(root), 'apps/bar/src/ottabase/config/packages.ts')).toMatchObject({
+            action: 'edit',
+            detail: "add /admin/infrastructure/tower/history to client key 'tower'",
+        });
+    });
+});
+
+describe('a later release that adds a notice', () => {
+    it('inserts the missing notice into the existing entry, once', () => {
+        const root = fixture();
+        const plan = () => planAdd(root, 'bar', readPackageDescriptor(root, 'pulse'));
+        applyAdd(root, plan());
+        const file = path.join(root, 'packages/pulse/package.json');
+        const pkg = fs.readJsonSync(file);
+        pkg.ottabase.notices['plan-changed'] = { type: 'info', message: 'Plan changed.' };
+        fs.writeJsonSync(file, pkg);
+        const step = plan().steps.find((s) => s.file === 'apps/bar/src/ottabase/config/packages.ts')!;
+        expect(step).toMatchObject({ action: 'edit', detail: "add notice plan-changed to client key 'pulse'" });
+        applyAdd(root, plan());
+        const client = text(root, 'apps/bar/src/ottabase/config/packages.ts');
+        expect(client).toContain(
+            "                inline: true,\n            },\n            'plan-changed': {\n                type: 'info',\n                message: 'Plan changed.',\n            },\n        },\n    }),",
+        );
+        expect(plan().steps.find((s) => s.file === 'apps/bar/src/ottabase/config/packages.ts')!.action).toBe('skip');
+    });
+});
+
+describe('wiredSomething', () => {
+    it('does not count the template record on its own', () => {
+        const record = { file: 'apps/bar/.ottabase-templates.json', action: 'create' as const, detail: '' };
+        expect(wiredSomething([{ file: 'a', action: 'skip', detail: '' }, record])).toBe(false);
+        expect(wiredSomething([{ file: 'a', action: 'edit', detail: '' }, record])).toBe(true);
+    });
+
+    it('reports an app added before the record existed, copies unchanged, as already wired', () => {
+        const root = fixture();
+        applyAdd(root, planAdd(root, 'bar', readPackageDescriptor(root, 'tower')));
+        fs.removeSync(path.join(root, 'apps/bar/.ottabase-templates.json'));
+        const plan = planAdd(root, 'bar', readPackageDescriptor(root, 'tower'));
+        expect(plan.steps.find((s) => s.file === 'apps/bar/.ottabase-templates.json')?.action).toBe('create');
+        expect(wiredSomething(plan.steps)).toBe(false);
     });
 });

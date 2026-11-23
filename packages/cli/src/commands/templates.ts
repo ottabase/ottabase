@@ -12,6 +12,9 @@
 //                                                 template's changes applied to your edits
 //   - both changed the same lines              -> conflict markers in the file, as git writes
 //                                                 them; resolve them and commit
+//   - git cannot merge them (binary, error)    -> left alone, the plan says why
+//   - template removed from the package        -> copy deleted when unedited, flagged when
+//                                                 edited; the record forgets it either way
 //
 // A copy made before this record existed has no base: when it still equals the template it is
 // recorded from now on; when it differs, it is left alone and the plan says so.
@@ -43,7 +46,7 @@ export type TemplateOutcome =
     | { action: 'conflict'; content: string; detail: string }
     | { action: 'skip'; detail: string };
 
-const lf = (text: string) => text.replace(/\r\n/g, '\n');
+export const lf = (text: string) => text.replace(/\r\n/g, '\n');
 const eolOf = (text: string) => (text.includes('\r\n') ? '\r\n' : '\n');
 const withEol = (text: string, eol: string) => (eol === '\n' ? text : text.replace(/\n/g, eol));
 
@@ -65,15 +68,15 @@ export function serializeTemplateRecords(records: TemplateRecords): string | nul
     return `${JSON.stringify({ version: 1, files }, null, 4)}\n`;
 }
 
+export type MergeResult = { ok: true; text: string; conflicts: boolean } | { ok: false; reason: string };
+
 /**
  * Three-way merge with `git merge-file` (git's own algorithm, on plain files: no repository
- * needed). Null when git is not installed.
+ * needed). Null when git is not installed. Exit status 1 to 127 is the number of conflicts (stdout
+ * holds the merge with markers); anything else (255 for a binary file or an error, a signal) is a
+ * failure, never an empty merge: writing that stdout would wipe the copy.
  */
-export function mergeThreeWay(
-    current: string,
-    base: string,
-    incoming: string,
-): { text: string; conflicts: boolean } | null {
+export function mergeThreeWay(current: string, base: string, incoming: string): MergeResult | null {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otta-merge-'));
     try {
         const files = {
@@ -88,16 +91,20 @@ export function mergeThreeWay(
         try {
             const text = execFileSync('git', [...args, files.current, files.base, files.incoming], {
                 encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
             });
-            return { text, conflicts: false };
+            return { ok: true, text, conflicts: false };
         } catch (error) {
-            const failure = error as { code?: string; status?: number; stdout?: string };
+            const failure = error as { code?: string; status?: number | null; stdout?: string; stderr?: string };
             if (failure.code === 'ENOENT') return null;
-            // The exit status is the number of conflicts; stdout holds the merge with markers.
-            if (typeof failure.status === 'number' && failure.status > 0 && typeof failure.stdout === 'string') {
-                return { text: failure.stdout, conflicts: true };
+            const status = failure.status;
+            if (typeof status === 'number' && status >= 1 && status <= 127 && typeof failure.stdout === 'string') {
+                return { ok: true, text: failure.stdout, conflicts: true };
             }
-            throw error;
+            const reason =
+                (typeof failure.stderr === 'string' && failure.stderr.trim().split(/\r?\n/)[0]) ||
+                (typeof status === 'number' ? `git merge-file exited ${status}` : String(error));
+            return { ok: false, reason };
         }
     } finally {
         fs.removeSync(dir);
@@ -155,6 +162,9 @@ export function planTemplate(input: {
             outcome: { action: 'skip', detail: 'the template changed and so did your copy; install git to merge them' },
             record: null,
         };
+    }
+    if (!merged.ok) {
+        return { outcome: { action: 'skip', detail: `could not merge: ${merged.reason}` }, record: null };
     }
     const content = withEol(merged.text, eolOf(current));
     return merged.conflicts

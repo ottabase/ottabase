@@ -148,10 +148,16 @@ your edits.
   (commit it). Template unchanged: nothing happens. Your copy unchanged: it becomes the new template (`update`). Both
   changed: the template's changes are merged into your edits with `git merge-file` (`merge`); where both changed the
   same lines, the file gets conflict markers (`<<<<<<< yours`) and the plan says `conflict`. A copy made before the
-  record existed is recorded when it still equals the template and left alone (with a note) when it does not.
-- **New pages and routes** a release declares are inserted into the package's existing client entry; an entry edited by
-  hand out of shape is left alone and the plan names the paths to add.
-- **New tables** join the package's existing re-export line in `ottabase/db/schema.ts`.
+  record existed is recorded when it still equals the template and left alone (with a note) when it does not; recording
+  it alone still reports "already wired". When git is missing or cannot merge (a binary file), the copy and its record
+  stay as they were and the plan says why. A template the package no longer ships is deleted where your copy is
+  unchanged (`delete`), flagged "removed upstream: review it" where you edited it, and dropped from the record either
+  way; the composition (`ottabase/packages/<key>.ts`) is never deleted, the package list imports it.
+- **New pages, routes and notices** a release declares are inserted into the package's own client entry (another package
+  listing the same path does not count); an entry edited by hand out of shape is left alone and the plan names what to
+  add.
+- **New tables** join the package's existing re-export line in `ottabase/db/schema.ts` (its line ending kept). An export
+  spread over several lines is left alone and the plan names only the tables it lacks.
 
 A boundary that already has an `onError` is left alone and the plan says what to do by hand. Two packages routing one
 path, or a package routing a path the app owns, stop the app at boot with both names. `page` is a module path under
