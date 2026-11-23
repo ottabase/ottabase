@@ -11527,22 +11527,22 @@ owns. Everything else stays in the host app.
 
 ### Owned by `@ottabase/auth` (via `handleAuthRequest`)
 
-| Route                                  | Method  | Description                                                                |
-| -------------------------------------- | ------- | -------------------------------------------------------------------------- |
-| `/api/auth/csrf`                       | GET     | Sets the CSRF cookie, returns `{ csrfToken }`                              |
-| `/api/auth/session`                    | GET     | Returns the current `Session` or `null`                                    |
-| `/api/auth/callback/credentials`       | POST    | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }`   |
-| `/api/auth/signin/:provider`           | GET     | `?callbackUrl=` → 302 redirect to the OAuth provider                       |
-| `/api/auth/callback/:provider`         | GET     | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`    |
-| `/api/auth/signin/email`               | POST    | `{ email, csrfToken, callbackUrl }` → sends a magic link                   |
-| `/api/auth/callback/email`             | GET     | Verifies the magic-link token, creates a session, redirects                |
-| `/api/auth/signout`                    | POST    | `{ csrfToken }` → revokes the current session only, clears the cookie      |
-| `/api/auth/passkey/options`            | POST    | Sign-in options for a passkey (a single-use challenge)                     |
-| `/api/auth/callback/passkey`           | POST    | `{ credential, csrfToken }` → `{ success, session }`                       |
-| `/api/auth/two-factor/challenge`       | GET     | `{ pending, passkey, recoveryCodes }`: is a sign-in waiting on a code?     |
-| `/api/auth/two-factor/challenge`       | POST    | `{ code }` or `{ recoveryCode }` or `{ passkey }` → `{ success, session }` |
-| `/api/auth/two-factor/passkey-options` | POST    | Options to finish a waiting sign-in with a passkey                         |
-| `/api/auth/factors/*`                  | various | The signed-in person's authenticator app and passkeys (below)              |
+| Route                                  | Method  | Description                                                                 |
+| -------------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `/api/auth/csrf`                       | GET     | Sets the CSRF cookie, returns `{ csrfToken }`                               |
+| `/api/auth/session`                    | GET     | Returns the current `Session` or `null`                                     |
+| `/api/auth/callback/credentials`       | POST    | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }`    |
+| `/api/auth/signin/:provider`           | GET     | `?callbackUrl=` → 302 redirect to the OAuth provider                        |
+| `/api/auth/callback/:provider`         | GET     | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`     |
+| `/api/auth/signin/email`               | POST    | `{ email, csrfToken, callbackUrl }` → sends a magic link                    |
+| `/api/auth/callback/email`             | GET     | Verifies the magic-link token, creates a session, redirects                 |
+| `/api/auth/signout`                    | POST    | `{ csrfToken }` → revokes the current session only, clears the cookie       |
+| `/api/auth/passkey/options`            | POST    | Sign-in options for a passkey (a single-use challenge)                      |
+| `/api/auth/callback/passkey`           | POST    | `{ credential, csrfToken }` → `{ success, session }`                        |
+| `/api/auth/two-factor/challenge`       | GET     | `{ pending, methods? }`: is a sign-in waiting, and which ways can finish it |
+| `/api/auth/two-factor/challenge`       | POST    | `{ code }` or `{ recoveryCode }` or `{ passkey }` → `{ success, session }`  |
+| `/api/auth/two-factor/passkey-options` | POST    | Options to finish a waiting sign-in with a passkey                          |
+| `/api/auth/factors/*`                  | various | The signed-in person's authenticator app and passkeys (below)               |
 
 With an authenticator app on the account, the credentials callback answers
 `200 { success: false, twoFactorRequired: true }` and sets a pending cookie instead of the session; OAuth and magic-link
