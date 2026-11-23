@@ -394,9 +394,18 @@ describe('runReadiness', () => {
 });
 
 describe('secondFactorRequiredFrom', () => {
+    const ask = (userId: string, organizationId: string | null = 'org-1') => ({
+        userId,
+        organizationId,
+        signInMethod: 'password',
+    });
+
     it('is null with no contributor, and the earliest date when several answer', async () => {
         expect(
-            await createPackageRegistry<Env>({ packages: [pkg({ key: 'plain' })] }).secondFactorRequiredFrom({}, 'u1'),
+            await createPackageRegistry<Env>({ packages: [pkg({ key: 'plain' })] }).secondFactorRequiredFrom(
+                {},
+                ask('u1'),
+            ),
         ).toBeNull();
         const registry = createPackageRegistry<Env>({
             packages: [
@@ -404,12 +413,32 @@ describe('secondFactorRequiredFrom', () => {
                 pkg({ key: 'none', auth: { secondFactorRequiredFrom: async () => null } }),
                 pkg({
                     key: 'early',
-                    auth: { secondFactorRequiredFrom: async (_env, userId) => (userId === 'u1' ? 1000 : null) },
+                    auth: { secondFactorRequiredFrom: async (_env, { userId }) => (userId === 'u1' ? 1000 : null) },
                 }),
             ],
         });
-        expect(await registry.secondFactorRequiredFrom({}, 'u1')).toBe(1000);
-        expect(await registry.secondFactorRequiredFrom({}, 'u2')).toBe(2000);
+        expect(await registry.secondFactorRequiredFrom({}, ask('u1'))).toBe(1000);
+        expect(await registry.secondFactorRequiredFrom({}, ask('u2'))).toBe(2000);
+    });
+
+    it('hands every contributor the organization and sign-in method it is asked about', async () => {
+        const seen: unknown[] = [];
+        const registry = createPackageRegistry<Env>({
+            packages: [
+                pkg({
+                    key: 'org-policy',
+                    auth: {
+                        secondFactorRequiredFrom: async (_env, input) => {
+                            seen.push(input);
+                            return input.organizationId === 'strict' ? 1000 : null;
+                        },
+                    },
+                }),
+            ],
+        });
+        expect(await registry.secondFactorRequiredFrom({}, ask('u1', 'strict'))).toBe(1000);
+        expect(await registry.secondFactorRequiredFrom({}, ask('u1', 'relaxed'))).toBeNull();
+        expect(seen[0]).toEqual({ userId: 'u1', organizationId: 'strict', signInMethod: 'password' });
     });
 
     it('throws when a contributor does, so the sign-in fails closed', async () => {
@@ -421,6 +450,6 @@ describe('secondFactorRequiredFrom', () => {
                 }),
             ],
         });
-        await expect(registry.secondFactorRequiredFrom({}, 'u1')).rejects.toThrow('down');
+        await expect(registry.secondFactorRequiredFrom({}, ask('u1'))).rejects.toThrow('down');
     });
 });

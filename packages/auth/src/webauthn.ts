@@ -402,6 +402,9 @@ export async function verifyRegistration(
     const authData = parseAuthenticatorData(asBytes(value.get('authData')));
     await checkRpIdHash(authData, rp);
     if (!authData.userPresent) throw new WebAuthnError('user-not-present');
+    // The options ask for user verification (`required`), so a credential made without it is
+    // refused (WebAuthn L2 7.1 step 15): a passkey stands in for two factors only with it.
+    if (!authData.userVerified) throw new WebAuthnError('user-not-verified');
     if (!authData.credential) throw new WebAuthnError('credential-missing');
 
     const { jwk, algorithm } = coseToJwk(authData.credential.publicKey);

@@ -105,8 +105,9 @@ These routes live in the app and call `hashPassword` / `verifyPassword` / `getSe
 
 Register signs the new account in itself when no email verification is required: it checks the CSRF token with
 `requireCsrf(request, env, body.csrfToken)` and finishes with `completeSignIn(user, env, request, options)`, the same
-tail the credentials callback runs (first-user bootstrap, `onSignIn`, the session cookie). `completeSignIn` returns
-`{ cookie, session }`, or null when the account could not be finished; answer 500 and set no cookie then.
+tail the credentials callback runs (first-user bootstrap, `onSignIn`, the session cookie stamped with `authAt` = now).
+`completeSignIn` returns `{ cookie, session }`, or null when the account could not be finished; answer 500 and set no
+cookie then. Its optional fifth argument names the sign-in (`{ signInMethod: 'register' }`), stored on the session.
 
 ```typescript
 import { completeSignIn, requireCsrf } from '@ottabase/auth/backend';
@@ -114,7 +115,9 @@ import { completeSignIn, requireCsrf } from '@ottabase/auth/backend';
 const rejected = await requireCsrf(request, env, body.csrfToken);
 if (rejected) return rejected;
 // ... create the user ...
-const signedIn = await completeSignIn({ id, email, name, image: null, emailVerified: null }, env, request, options);
+const signedIn = await completeSignIn({ id, email, name, image: null, emailVerified: null }, env, request, options, {
+    signInMethod: 'register',
+});
 if (!signedIn) return errorResponse('Account created, but signing in failed', 500);
 return jsonResponse({ success: true, session: signedIn.session }, 200, { headers: { 'Set-Cookie': signedIn.cookie } });
 ```
@@ -204,47 +207,105 @@ event's actor and swallows a bus failure.
 Both live in one table, `authenticators` (core, from `@ottabase/ottaorm`: list `authenticatorsTable` with the core
 tables and `Authenticator` with the core models). Generic CRUD never serves it.
 
+**Two-factor is on** when the person has a confirmed authenticator app OR at least one passkey
+(`Authenticator.hasTwoFactor`, `withTwoFactor` for a roster). A policy is satisfied by either.
+
 **One gate.** Password, magic-link and OAuth sign-ins all end in `signInOrChallenge` (`src/sign-in.ts`). An account with
-a confirmed authenticator app gets a 10-minute pending cookie (`ottabase.<APP_ID>.second-factor`, `Path=/api/auth`)
-instead of a session, and `POST /two-factor/challenge` issues the session once a code, a recovery code or one of the
-person's passkeys checks out. A passkey sign-in with user verification is two factors already and never gets the
-challenge. Sessions minted outside a sign-in (the password-change reissue, the first-run owner, SSO through an identity
-provider, which owns its MFA) are not challenged.
+two-factor on gets a 10-minute pending cookie (`ottabase.<APP_ID>.second-factor`, `Path=/api/auth`) instead of a
+session: the password callback answers 200 `{ twoFactorRequired: true, code: 'SECOND_FACTOR_REQUIRED' }`, OAuth and
+magic links redirect to `/login/two-factor`. `POST /two-factor/challenge` issues the session once a code (if the app is
+on), one of the person's passkeys (if any) or a recovery code checks out; `GET /two-factor/challenge` says which
+(`{ pending, methods: { totp, passkey, recoveryCode } }`). A passkey sign-in with user verification is two factors
+already and never gets the challenge. Sessions minted outside a sign-in (the password-change reissue, SSO through an
+identity provider, which owns its MFA) are not challenged.
 
-**Authenticator app (TOTP).** RFC 6238, SHA-1, six digits, 30 seconds, one step of drift either way. The secret is
-sealed with AES-GCM under a key derived from `AUTH_SECRET`; each accepted step is stored, so a code works once. Turning
-it on hands out ten recovery codes, shown once and stored hashed as single-use `verification_tokens` rows. After five
-wrong codes in fifteen minutes the challenge answers 429 (counted per person in KV). The count is not atomic, so
-requests sent in parallel can each get a try: keep a per-IP rate limit on `/api/auth/two-factor/*` (otta-web's
-`two-factor` bucket does) as the hard bound.
+**Sign-in time and method.** Every session a sign-in issues carries `authAt` (when the person proved who they are) and
+`signInMethod` (`password`, `magic-link`, `oauth:<provider>`, `passkey`, `register`, `owner`, `sso:<connectionId>`...),
+both immutable. A host minting a session itself passes them to `createSessionCookieForUser` (`authAt: Date.now()` for a
+sign-in; the old session's values, from `readSessionIdentity`, for a reissue). Without `authAt` a session is never a
+recent sign-in.
 
-**A session confined until two-factor is on is not signed out.** Off `/api/auth/*` it gets 401s; otta-web marks those
-`X-Session-Ended: two-factor-setup` (`isTwoFactorSetupPending`) so its API client keeps the session and the app stays on
-`/security` instead of sending the person to the login page.
+**Authenticator app (TOTP).** RFC 6238, SHA-1, six digits, 30 seconds, one step of drift either way, one app per person.
+The secret is sealed with AES-GCM under `AUTH_FACTOR_KEY` (else `AUTH_SECRET`); each accepted step is stored, so a code
+works once. If the key changes, the app cannot be read: the challenge answers 409 `AUTHENTICATOR_UNREADABLE` (not
+counted as a guess) and the person uses a recovery code or a passkey, then sets the app up again.
 
-**Passkeys.** WebAuthn with attestation `none`: ES256, RS256 and Ed25519 keys kept as JWKs, user verification required,
-discoverable credentials, a signature counter that may not go backwards. The relying party is the host of `AUTH_URL` and
-the origin its origin, never the request's. Browsers refuse an IP address as a relying party, so passkeys need the app
-at a domain over https, or at `localhost` in development (`AUTH_URL=http://localhost:3003`, not `127.0.0.1`);
-`passkeysAvailable(env)` says which, and the login config carries it.
+**Recovery codes.** Ten, `xxxx-xxxx-xxxx-xxxx` (80 bits each), handed out when two-factor first turns on: the TOTP
+confirm or the first passkey answers with `recoveryCodes`. Shown once, stored as SHA-256 hashes in
+`verification_tokens`, single-use, regenerable, deleted when the last factor goes. A recovery code spent on a sign-in
+that then fails (the app's `onSignIn` threw) is put back.
 
-**Changing factors needs a recent sign-in.** Every write under `/factors` requires a session under 15 minutes old
-(`RECENT_SIGN_IN_MS`), else `403 REAUTH_REQUIRED`: a stolen cookie cannot add its own passkey or turn the app off.
+**Attempt limits.** Every code and recovery code is counted BEFORE it is checked, as a row in `verification_tokens`
+inserted then counted (`VerificationToken.recordAttempts`), so parallel guesses cannot all slip under the limit: more
+than five against one pending sign-in, or more than thirty against the account in an hour, answers 429
+`TOO_MANY_ATTEMPTS` unchecked. Success clears both. A passkey is never counted or blocked, so a person locked out of
+codes can still finish with one. The TOTP setup confirm counts against the account limit too.
 
-| Route                                | Method        | Body / answer                                              |
-| ------------------------------------ | ------------- | ---------------------------------------------------------- |
-| `/api/auth/factors`                  | GET           | `{ twoFactor, passkeys, passkeysAvailable, recentSignIn }` |
-| `/api/auth/factors/totp`             | POST          | → `{ secret, uri }` (show `uri` as a QR code)              |
-| `/api/auth/factors/totp/confirm`     | POST          | `{ code }` → `{ recoveryCodes }`                           |
-| `/api/auth/factors/totp`             | DELETE        | turns it off, recovery codes with it                       |
-| `/api/auth/factors/recovery-codes`   | POST          | → a fresh `{ recoveryCodes }`                              |
-| `/api/auth/factors/passkeys/options` | POST          | creation options for `navigator.credentials.create`        |
-| `/api/auth/factors/passkeys`         | POST          | `{ credential, name }` → `{ passkey }`                     |
-| `/api/auth/factors/passkeys/:id`     | PATCH, DELETE | `{ name }` / remove (the caller's own only)                |
+**A session confined until two-factor is on is not signed out.** Off `/api/auth/*` and `/api/users/me` (where the person
+can switch to another organization) it gets 401s; otta-web marks those `X-Session-Ended: two-factor-setup` (from
+`sessionRefusal`, else `isTwoFactorSetupPending`) so its API client keeps the session and the app stays on `/security`
+instead of sending the person to the login page.
+
+**Passkeys.** WebAuthn with attestation `none`: ES256, RS256 and Ed25519 keys kept as JWKs, user verification required
+at registration and sign-in, discoverable credentials, a signature counter that only moves forward (also between two
+racing assertions). At the challenge, a passkey of anyone else is refused before its counter is touched. The relying
+party is the host of `AUTH_URL` and the origin its origin, never the request's. Browsers refuse an IP address as a
+relying party, so passkeys need the app at a domain over https, or at `localhost` in development
+(`AUTH_URL=http://localhost:3003`, not `127.0.0.1`); `passkeysAvailable(env)` says which, and the login config carries
+it.
+
+**Changing factors needs a recent sign-in.** Every write under `/factors` requires `authAt` under 15 minutes old
+(`RECENT_SIGN_IN_MS`), else `403 REAUTH_REQUIRED`: a stolen cookie cannot add its own passkey or remove the app, and a
+password change does not reopen the window. `requireRecentSignIn(request, env, options)` gives a host route the same
+check (null, or the 401/403 to send). Removing the last factor while the active organization's policy applies is 409
+`TWO_FACTOR_REQUIRED`.
+
+| Route                                | Method        | Body / answer                                                                                                                                                   |
+| ------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/auth/factors`                  | GET           | `{ twoFactor: { enabled, totp, totpPending, passkeys, recoveryCodesLeft, requiredFrom }, passkeys: [...], passkeysAvailable, recentSignIn, recentSignInUntil }` |
+| `/api/auth/factors/totp`             | POST          | `{ secret, uri }` (show `uri` as a QR code)                                                                                                                     |
+| `/api/auth/factors/totp/confirm`     | POST          | `{ code }` to `{ success, recoveryCodes? }` (codes only when two-factor just turned on)                                                                         |
+| `/api/auth/factors/totp`             | DELETE        | removes the app; the recovery codes go too when it was the last factor                                                                                          |
+| `/api/auth/factors/recovery-codes`   | POST          | a fresh `{ success, recoveryCodes }`                                                                                                                            |
+| `/api/auth/factors/passkeys/options` | POST          | creation options for `navigator.credentials.create`                                                                                                             |
+| `/api/auth/factors/passkeys`         | POST          | `{ credential, name }` to `{ success, passkey, recoveryCodes? }`                                                                                                |
+| `/api/auth/factors/passkeys/:id`     | PATCH, DELETE | `{ name }` / remove (the caller's own only)                                                                                                                     |
+
+Every failure is an `errorResponse` with a stable `code`:
+
+| Code                          | Status  | When                                                                                   |
+| ----------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `SECOND_FACTOR_EXPIRED`       | 401     | no pending sign-in (challenge, its passkey options)                                    |
+| `SECOND_FACTOR_INVALID`       | 401     | a wrong code or recovery code, at the challenge or the setup confirm                   |
+| `TOO_MANY_ATTEMPTS`           | 429     | over an attempt limit                                                                  |
+| `AUTHENTICATOR_UNREADABLE`    | 409     | the app's secret cannot be opened (the sealing key changed)                            |
+| `REAUTH_REQUIRED`             | 403     | a factor change without a recent sign-in                                               |
+| `TWO_FACTOR_REQUIRED`         | 409     | removing the last factor while a policy applies                                        |
+| `PASSKEYS_UNAVAILABLE`        | 400     | the app's address cannot have passkeys                                                 |
+| `PASSKEY_REFUSED`             | 401/400 | a passkey that does not check out (sign-in, challenge) / cannot be added               |
+| `PASSKEY_EXISTS`              | 409     | that passkey is already added                                                          |
+| `ALREADY_ENABLED`             | 409     | an authenticator app is already set up                                                 |
+| `NO_PENDING_SETUP`            | 409     | confirm without a started setup                                                        |
+| `NOT_ENABLED`                 | 409     | recovery codes asked for while two-factor is off                                       |
+| `NOT_FOUND`                   | 404     | no such passkey (of the caller's), no app to remove, no passkey on the pending account |
+| `VALIDATION_ERROR`            | 400     | a missing name or proof                                                                |
+| `UNAUTHORIZED`                | 401     | no session                                                                             |
+| `EMAIL_UNVERIFIED`            | 401     | `requireVerifiedEmail` and the email is not verified                                   |
+| `ACCOUNT_PROVISIONING_FAILED` | 500     | the account could not be finished (opaque message, stable code)                        |
 
 The browser side is in `@ottabase/auth/client`: `signInWithPasskey`, `getTwoFactorChallenge`, `submitTwoFactor`,
 `getFactors`, `startTotpSetup`, `confirmTotpSetup`, `disableTotp`, `regenerateRecoveryCodes`, `addPasskey`,
-`renamePasskey`, `removePasskey`, `isPasskeySupported`. otta-web's pages are `/login/two-factor` and `/security`.
+`renamePasskey`, `removePasskey`, `isPasskeySupported`. otta-web's pages are `/login/two-factor` and `/security`. Every
+call resolves, never throws: a failure is `{ success: false, error, code }`, and no response at all is
+`code: 'NETWORK_ERROR'` (for `getTwoFactorChallenge`, an `error` beside `pending: false`, so a page can tell "offline"
+from "expired"). A passkey ceremony the person closed comes back as `{ cancelled: true }` with nothing to show; a
+refusal by the browser, a timeout, or `InvalidStateError` on create (the device already has a passkey here) comes back
+with an `error` (`isPasskeyCancelled` holds the rule). `addPasskey()` names the passkey for the browser and device
+(`defaultPasskeyName()`, for example "Safari on iPhone") unless given a name, and returns `recoveryCodes` when that
+first passkey turned two-factor on.
+
+In React, `useFactors()` from `@ottabase/auth/react` reads `GET /factors` on mount and returns
+`{ data, error, pending, reload }`; call `reload()` after each change.
 
 ```typescript
 import { signInWithCredentials } from '@ottabase/auth/client';
@@ -253,36 +314,44 @@ const result = await signInWithCredentials({ email, password });
 if (result.twoFactorRequired) navigate({ to: '/login/two-factor', search: { callbackUrl: '/dashboard' } });
 ```
 
-**Resetting it for someone else.** `resetTwoFactor(userId, env, options)` from `@ottabase/auth/backend` removes a
-person's authenticator app and recovery codes and refreshes their sessions, for an administrator helping a member who
-lost their phone. It checks nothing: the caller decides who may do it.
+**Resetting it for someone else.** `resetTwoFactor(userId, env, options)` from `@ottabase/auth/backend` removes ALL of a
+person's factors (authenticator app, passkeys, recovery codes), refreshes their sessions and announces
+`user.factor.changed { factor: 'all', change: 'removed' }`, for an administrator helping a member who lost their device.
+It checks nothing: the caller decides who may do it, and should hold its own request to `requireRecentSignIn`.
 
-**Requiring it.** `secondFactorRequiredFrom(env, userId)` returns the time from which a person must have two-factor on
-(or null). It is read when the session snapshot is built; bump the person's profile version (`bumpProfileVersion`) when
-the answer changes. Once the time passes, `getSession` returns null for that person's session everywhere except
-`/api/auth/*`, and the session read carries `twoFactorSetupRequired: true` so the app shows its setup page. A throw
-fails the sign-in closed. Apps built on Ottabase wire it from the package registry (`auth.secondFactorRequiredFrom` on a
-manifest), so an organization policy package needs no auth code.
+**Requiring it.** `secondFactorRequiredFrom(env, { userId, organizationId, signInMethod })` returns the time from which
+a person must have two-factor on while working in `organizationId`, the session's ACTIVE organization (or null), so a
+policy of one organization never confines someone working in another. It is read when the session snapshot is built.
+When the answer changes for one person, bump their profile version (`bumpProfileVersion`); when it changes for a whole
+organization, call `bumpOrganizationVersion(organizationId, env)` once, and every live session in it re-reads its
+snapshot on its next request. Once the time passes, `getSession` returns null for that session everywhere except
+`/api/auth/*` and `/api/users/me`, and the session read carries `twoFactorSetupRequired: true` so the app shows its
+setup page. A throw fails the sign-in closed; a failed refresh keeps the previous snapshot. Apps built on Ottabase wire
+it from the package registry (`auth.secondFactorRequiredFrom` on a manifest), so an organization policy package needs no
+auth code.
 
 ## Session Model
 
 The session cookie (`ottabase.<APP_ID>.session-token` by default, `ottabase.session-token` without `APP_ID`, overridable
-via `AUTH_COOKIE_NAME`) is a signed, self-contained JWT carrying only **identity** claims — `sub`, `jti`, `email`,
-`name`, `image`, `emailVerified`, `organizationId`, `createdAt`, `cms` (creation time in ms), `profileVersion`, `iat`,
-`exp`. The potentially large / frequently-changing **authorization snapshot** (`roles`, `permissions`) is deliberately
-kept **out of the cookie** and stored in the per-session KV registry record instead, so the cookie can never approach
-the ~4KB browser limit no matter how many permissions a user has, and revoked roles don't linger in a signed token for
-the session's whole lifetime. `getSession()` merges the identity claims with the snapshot into the returned `user`.
+via `AUTH_COOKIE_NAME`) is a signed, self-contained JWT carrying only **identity** claims: `sub`, `jti`, `email`,
+`name`, `image`, `emailVerified`, `organizationId`, `createdAt`, `cms` (creation time in ms), `authAt` (last real
+sign-in in ms, absent for a session minted without one), `signInMethod`, `profileVersion`, `iat`, `exp`. The potentially
+large / frequently-changing **authorization snapshot** (`roles`, `permissions`) is deliberately kept **out of the
+cookie** and stored in the per-session KV registry record instead, so the cookie can never approach the ~4KB browser
+limit no matter how many permissions a user has, and revoked roles don't linger in a signed token for the session's
+whole lifetime. `getSession()` merges the identity claims with the snapshot into the returned `user`.
 
 In production the cookie is `Secure` and uses the `__Host-` name prefix (pinned to the host, `Path=/`, no `Domain`) so
 it can't be tossed/shadowed by a sibling subdomain; in an explicit dev environment over plain HTTP the prefix and
 `Secure` are dropped so local development still works.
 
 Verifying a request is the JWT signature/expiry check plus **one parallel batch of KV reads** (bulk-revocation marker,
-per-session sign-out tombstone, registry snapshot, and the profile-version counter). There's no database read on the hot
-path unless a profile-version bump flags the snapshot stale (refreshed once from D1, then the registry record is
-rewritten so later requests skip the read) or a freshly-issued session's registry record hasn't propagated yet (see the
-grace window below).
+per-session sign-out tombstone, registry snapshot, the profile-version counter, and the version counter of the
+organization the session was issued in; a session that has switched organization since reads its current one's with one
+more KV read). There's no database read on the hot path unless a profile-version or organization-version bump flags the
+snapshot stale (refreshed once from D1, then the registry record is rewritten so later requests skip the read) or a
+freshly-issued session's registry record hasn't propagated yet (see the grace window below; without D1 such a session is
+refused, since there is no snapshot to judge it by).
 
 **`OBCF_KV` is required.** Session verification consults KV on every request and fails _closed_: if `OBCF_KV` isn't
 bound, or a KV read errors, `getSession` returns `null` rather than trusting an unverifiable token. Deploying without
@@ -345,7 +414,7 @@ import {
     revokeUserSessionById,
 } from '@ottabase/auth/backend';
 
-const me = await readSessionIdentity(request, env); // { userId, jti } from the cookie, no KV read
+const me = await readSessionIdentity(request, env); // { userId, jti, createdMs, authAt, signInMethod }, no KV read
 const sessions = await listUserSessions(me.userId, env, me.jti); // newest first, `current` marked
 await renameUserSession(me.userId, sessions[0].id, 'Work laptop', env);
 await revokeUserSessionById(me.userId, sessions[1].id, env);
@@ -364,7 +433,9 @@ what an erasure needs, since a "revoked since" marker alone leaves the records u
 
 `wasSessionRevoked(request, env)` answers why a request with a validly signed cookie failed: true when its jti was
 tombstoned (revoked from another session) or it predates a "revoked since" marker (password change). Call it only on a
-request that already failed authentication; it costs two KV reads.
+request that already failed authentication; it costs two KV reads. Cheaper first: `sessionRefusal(request)` returns what
+`getSession` already concluded about that same `Request` object (`'revoked'`, `'two-factor-setup'`, null for no reason
+worth telling, `undefined` when `getSession` never saw it), so a 401 handler probes only on `undefined`.
 
 ### Locale and timezone defaults for new accounts
 
@@ -684,6 +755,10 @@ const config = getLoginConfig(process.env);
 Individual pieces are also exported: `CredentialsForm`, `MagicLinkForm`, `RegisterForm`, `SocialLoginButtons` +
 `SocialLoginDivider`.
 
+`showPasskey` with `onPasskeyLogin` puts "Sign in with a passkey" first in the card, above the "or" divider. The
+callback gets the form's "Remember me" choice (`{ rememberMe }`), which `LoginForm` holds for both. Pass `showPasskey`
+once the login config is known (`passkeys` in `LoginConfig`) and `isPasskeySupported()` is true, so nothing shifts.
+
 `LoginForm`, `CredentialsForm`, `MagicLinkForm` and `RegisterForm` take a `botCheck` node rendered inside the form,
 above the submit button. `LoginForm` hands its one node to whichever method is showing, so one widget covers password
 and magic link:
@@ -704,24 +779,25 @@ const human = useTurnstile('signin'); // from @ottabase/ui/turnstile
 
 ## Environment Variables
 
-| Variable                                                | Required                                      | Purpose                                                                                               |
-| ------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`                                           | Yes (fails closed without it)                 | HMAC secret (>= 16 chars, 32+ recommended) for session JWTs, CSRF tokens, OAuth state/PKCE cookies    |
-| `AUTH_ALLOW_INSECURE_DEV_SECRET`                        | No (local dev only)                           | `"true"` permits the built-in insecure dev secret — only honored when `ENVIRONMENT` is a dev value    |
-| `CORS_ALLOWED_ORIGINS`                                  | No                                            | Comma-separated extra origins allowed for credentialed CORS (same-origin + `AUTH_URL` always allowed) |
-| `AUTH_URL`                                              | No                                            | Frontend origin used for redirects + OAuth `redirect_uri` (defaults to `http://127.0.0.1:3003`)       |
-| `AUTH_COOKIE_NAME`                                      | No                                            | Overrides the session cookie name (default `ottabase.<APP_ID>.session-token`)                         |
-| `AUTH_DISABLE_CREDENTIALS`                              | No                                            | `"true"`/`"1"` disables `POST /api/auth/callback/credentials`                                         |
-| `AUTH_REQUIRE_EMAIL_VERIFIED`                           | No                                            | `"true"`/`"1"` rejects credentials sign-in for unverified users                                       |
-| `AUTH_SESSION_MAX_AGE`                                  | No                                            | Session lifetime in seconds (default 30 days)                                                         |
-| `GOOGLE_CLIENT_ID` / `_SECRET`                          | For Google OAuth                              |                                                                                                       |
-| `GITHUB_CLIENT_ID` / `_SECRET`                          | For GitHub OAuth                              |                                                                                                       |
-| `DISCORD_CLIENT_ID` / `_SECRET`                         | For Discord OAuth                             |                                                                                                       |
-| `AZURE_AD_CLIENT_ID` / `_SECRET` / `AZURE_AD_TENANT_ID` | For Azure AD OAuth                            |                                                                                                       |
-| `AUTH0_CLIENT_ID` / `_SECRET` / `AUTH0_ISSUER`          | For Auth0 OAuth                               |                                                                                                       |
-| `EMAIL_RESEND_API_KEY`                                  | For Resend magic links                        |                                                                                                       |
-| `EMAIL_SERVER` / `EMAIL_FROM`                           | For SMTP magic links                          |                                                                                                       |
-| `DEV_EMAIL_TRAP_ENABLED`                                | For local dev email capture (needs `OBCF_KV`) |                                                                                                       |
+| Variable                                                | Required                                      | Purpose                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`                                           | Yes (fails closed without it)                 | HMAC secret (>= 16 chars, 32+ recommended) for session JWTs, CSRF tokens, OAuth state/PKCE cookies                                                                                                                                                        |
+| `AUTH_FACTOR_KEY`                                       | No (defaults to `AUTH_SECRET`)                | Key authenticator-app secrets are sealed under. Rotating it (or `AUTH_SECRET` while this is unset) makes every enrolled app unreadable: those people answer `AUTHENTICATOR_UNREADABLE`, sign in with a recovery code or passkey, and set the app up again |
+| `AUTH_ALLOW_INSECURE_DEV_SECRET`                        | No (local dev only)                           | `"true"` permits the built-in insecure dev secret, only honored when `ENVIRONMENT` is a dev value                                                                                                                                                         |
+| `CORS_ALLOWED_ORIGINS`                                  | No                                            | Comma-separated extra origins allowed for credentialed CORS (same-origin + `AUTH_URL` always allowed)                                                                                                                                                     |
+| `AUTH_URL`                                              | No                                            | Frontend origin used for redirects + OAuth `redirect_uri` (defaults to `http://127.0.0.1:3003`)                                                                                                                                                           |
+| `AUTH_COOKIE_NAME`                                      | No                                            | Overrides the session cookie name (default `ottabase.<APP_ID>.session-token`)                                                                                                                                                                             |
+| `AUTH_DISABLE_CREDENTIALS`                              | No                                            | `"true"`/`"1"` disables `POST /api/auth/callback/credentials`                                                                                                                                                                                             |
+| `AUTH_REQUIRE_EMAIL_VERIFIED`                           | No                                            | `"true"`/`"1"` rejects credentials sign-in for unverified users                                                                                                                                                                                           |
+| `AUTH_SESSION_MAX_AGE`                                  | No                                            | Session lifetime in seconds (default 30 days)                                                                                                                                                                                                             |
+| `GOOGLE_CLIENT_ID` / `_SECRET`                          | For Google OAuth                              |                                                                                                                                                                                                                                                           |
+| `GITHUB_CLIENT_ID` / `_SECRET`                          | For GitHub OAuth                              |                                                                                                                                                                                                                                                           |
+| `DISCORD_CLIENT_ID` / `_SECRET`                         | For Discord OAuth                             |                                                                                                                                                                                                                                                           |
+| `AZURE_AD_CLIENT_ID` / `_SECRET` / `AZURE_AD_TENANT_ID` | For Azure AD OAuth                            |                                                                                                                                                                                                                                                           |
+| `AUTH0_CLIENT_ID` / `_SECRET` / `AUTH0_ISSUER`          | For Auth0 OAuth                               |                                                                                                                                                                                                                                                           |
+| `EMAIL_RESEND_API_KEY`                                  | For Resend magic links                        |                                                                                                                                                                                                                                                           |
+| `EMAIL_SERVER` / `EMAIL_FROM`                           | For SMTP magic links                          |                                                                                                                                                                                                                                                           |
+| `DEV_EMAIL_TRAP_ENABLED`                                | For local dev email capture (needs `OBCF_KV`) |                                                                                                                                                                                                                                                           |
 
 `AUTH_SECRET` resolution **fails closed**: it is required unless **both** `ENVIRONMENT` is an explicit dev value
 (`development`/`dev`/`test`/`local`) **and** `AUTH_ALLOW_INSECURE_DEV_SECRET=true` are set, in which case a built-in

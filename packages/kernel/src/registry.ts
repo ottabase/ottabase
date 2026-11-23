@@ -13,6 +13,7 @@ import type {
     OttaPackage,
     PackageRegistry,
     RouteContribution,
+    SecondFactorPolicyInput,
 } from './types';
 
 export interface PackageRegistryOptions<Env> {
@@ -94,8 +95,8 @@ export function createPackageRegistry<Env = unknown>(options: PackageRegistryOpt
     const secondFactorSources = packages.flatMap((pkg) =>
         pkg.auth?.secondFactorRequiredFrom ? [pkg.auth.secondFactorRequiredFrom] : [],
     );
-    const secondFactorRequiredFrom = async (env: Env, userId: string): Promise<number | null> => {
-        const answers = await Promise.all(secondFactorSources.map((source) => source(env, userId)));
+    const secondFactorRequiredFrom = async (env: Env, input: SecondFactorPolicyInput): Promise<number | null> => {
+        const answers = await Promise.all(secondFactorSources.map((source) => source(env, input)));
         const dates = answers.filter((at): at is number => typeof at === 'number' && Number.isFinite(at));
         return dates.length > 0 ? Math.min(...dates) : null;
     };

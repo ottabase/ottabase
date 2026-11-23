@@ -16,7 +16,7 @@
 // by mountPackages() and mountPremiumPackages() below.
 // ============================================================
 
-import { isTwoFactorSetupPending, wasSessionRevoked } from '@ottabase/auth/backend';
+import { isTwoFactorSetupPending, sessionRefusal, wasSessionRevoked } from '@ottabase/auth/backend';
 import { handleAnalyticsTrack } from '@ottabase/analytics/server';
 import { mountPackages, runHealth } from '@ottabase/kernel';
 import { Router } from '@ottabase/ottarouter';
@@ -453,17 +453,25 @@ export const SESSION_ENDED_HEADER = 'X-Session-Ended';
 
 /**
  * Every 401 passes through here: when the caller still holds a validly signed cookie whose session
- * was revoked (from another device, or by a password change), say so in a header. Only 401s pay
- * the two KV reads; a missing or expired cookie gets no header and reads as "expired".
+ * was revoked (from another device, or by a password change), say so in a header. The reason
+ * comes from getSession's own verdict on this request (`sessionRefusal`), so a 401 costs no extra
+ * KV read unless getSession never saw the request; a missing or expired cookie gets no header and
+ * reads as "expired".
  */
 async function markRevokedSession(request: Request, env: CloudflareEnv, response: Response): Promise<Response> {
     // A session a two-factor policy confines is not ended: the browser keeps it and sends the
     // person to /security (`two-factor-setup`), instead of signing them out into a login loop.
-    const reason = (await wasSessionRevoked(request, env as never))
-        ? 'revoked'
-        : (await isTwoFactorSetupPending(request, env as never, getAuthOptions(env)))
-          ? 'two-factor-setup'
-          : null;
+    // getSession already recorded why it refused this request; probe only when it never saw it
+    // (a route that answered 401 without reading the session, or read it off a copied Request).
+    const recorded = sessionRefusal(request);
+    const reason =
+        recorded !== undefined
+            ? recorded
+            : (await wasSessionRevoked(request, env as never))
+              ? 'revoked'
+              : (await isTwoFactorSetupPending(request, env as never, getAuthOptions(env)))
+                ? 'two-factor-setup'
+                : null;
     if (!reason) return response;
     const marked = new Response(response.body, response);
     marked.headers.set(SESSION_ENDED_HEADER, reason);

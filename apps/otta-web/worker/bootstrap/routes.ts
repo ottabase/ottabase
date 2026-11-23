@@ -673,6 +673,9 @@ async function handleCreateOwner(context: BootstrapContext): Promise<Response> {
                 email,
                 name: name || null,
                 emailVerified: verifiedAt,
+                // The owner just set their password here: a real sign-in.
+                authAt: Date.now(),
+                signInMethod: 'owner',
             },
             env as any,
             request,

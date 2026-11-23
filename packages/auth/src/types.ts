@@ -26,13 +26,17 @@ export interface SessionUser {
     timezone?: string | null;
     /** BCP 47 tag (`en-GB`) for language and number/date formats; null until set. */
     locale?: string | null;
-    /** Two-factor sign-in is on (a confirmed authenticator app). */
+    /** Two-factor sign-in is on (a confirmed authenticator app or at least one passkey). */
     twoFactorEnabled?: boolean;
-    /** Epoch ms from which a policy requires two-factor of this person; null when none does. */
+    /**
+     * Epoch ms from which a policy of the ACTIVE organization requires two-factor of this person;
+     * null when none does.
+     */
     twoFactorRequiredFrom?: number | null;
     /**
-     * A policy requires two-factor now and it is off. The session reaches `/api/auth/*` only until
-     * it is turned on: the app shows its setup screen and nothing else.
+     * A policy requires two-factor now and it is off. The session reaches `/api/auth/*` and
+     * `/api/users/me` only (so the person can set it up, or switch to another organization) until
+     * it is turned on.
      */
     twoFactorSetupRequired?: boolean;
     [key: string]: unknown;
@@ -63,6 +67,15 @@ export interface SessionTokenPayload extends Record<string, unknown> {
      *  used for the bulk-revocation comparison so a session reissued in the same second as a
      *  revoke-all is not wrongly invalidated when its KV snapshot has not yet propagated. */
     cms?: number;
+    /**
+     * When the person last proved who they are, epoch ms: set only when a real sign-in completes
+     * (a password and its second factor, a passkey, a magic link, OAuth, registration, the
+     * first-run owner). A session reissued without one (the password-change reissue) copies the
+     * old value, so it never refreshes the recent-sign-in window. Absent means "not recent".
+     */
+    authAt?: number;
+    /** How the session signed in (`password`, `magic-link`, `oauth:<provider>`, `passkey`...). Immutable. */
+    signInMethod?: string;
     iat?: number;
     exp?: number;
 }
@@ -70,6 +83,12 @@ export interface SessionTokenPayload extends Record<string, unknown> {
 /** Cloudflare bindings + environment variables consumed by the auth backend. */
 export interface AuthEnv extends ProviderEnv {
     AUTH_SECRET?: string;
+    /**
+     * Key the authenticator-app secrets are sealed under (else AUTH_SECRET). Rotating it makes
+     * every enrolled authenticator app unreadable: those people sign in with a recovery code or a
+     * passkey and set the app up again.
+     */
+    AUTH_FACTOR_KEY?: string;
     /** Explicit opt-in to the insecure built-in dev secret (only honored in a dev ENVIRONMENT). */
     AUTH_ALLOW_INSECURE_DEV_SECRET?: string;
     AUTH_URL?: string;
@@ -113,10 +132,13 @@ export interface UserVerifiedEvent {
     at: number;
 }
 
-/** `user.factor.changed`: a sign-in factor was added or removed. For the audit log and a security email. */
+/**
+ * `user.factor.changed`: a sign-in factor was added or removed. For the audit log and a security
+ * email. `factor: 'all'` with `change: 'removed'` is an administrator's reset (`resetTwoFactor`).
+ */
 export interface UserFactorChangedEvent {
     userId: string;
-    factor: 'totp' | 'passkey' | 'recovery-codes';
+    factor: 'totp' | 'passkey' | 'recovery-codes' | 'all';
     change: 'added' | 'removed' | 'regenerated';
     /** Epoch milliseconds. */
     at: number;
@@ -127,6 +149,15 @@ export interface AuthEvents {
     'user.created': UserCreatedEvent;
     'user.verified': UserVerifiedEvent;
     'user.factor.changed': UserFactorChangedEvent;
+}
+
+/** What `secondFactorRequiredFrom` is asked about (the kernel's `SecondFactorPolicyInput`, same shape). */
+export interface SecondFactorPolicyInput {
+    userId: string;
+    /** The session's active organization, or null when it has none. */
+    organizationId: string | null;
+    /** How the session signed in (`password`, `oauth:google`, `sso:<id>`...), or null. */
+    signInMethod: string | null;
 }
 
 export interface CredentialsAuthorizeOptions {
@@ -155,12 +186,14 @@ export interface CreateAuthConfigOptions extends CredentialsAuthorizeOptions {
      */
     supportedLanguages?: readonly string[];
     /**
-     * Epoch ms from which this person must have two-factor sign-in on, or null when nothing
-     * requires it (an organization policy, say). Read when a session snapshot is (re)built: bump
-     * the person's profile version when the answer changes. Once the date passes, a session
-     * without two-factor reaches `/api/auth/*` only. A throw fails the sign-in.
+     * Epoch ms from which this person must have two-factor sign-in on while working in
+     * `organizationId` (the session's ACTIVE organization), or null when nothing requires it.
+     * Read when a session snapshot is (re)built: bump the person's profile version when the answer
+     * changes for them, or `bumpOrganizationVersion` once when it changes for a whole organization.
+     * Once the date passes, a session without two-factor reaches `/api/auth/*` and `/api/users/me`
+     * only. A throw fails the sign-in.
      */
-    secondFactorRequiredFrom?: (env: AuthEnv, userId: string) => Promise<number | null>;
+    secondFactorRequiredFrom?: (env: AuthEnv, input: SecondFactorPolicyInput) => Promise<number | null>;
     /**
      * Name an authenticator app shows next to the code (`issuer` in the otpauth URI) and the
      * browser shows when a passkey is made. Default: AUTH_URL's host.

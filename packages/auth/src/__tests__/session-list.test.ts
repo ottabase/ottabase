@@ -21,6 +21,8 @@ vi.mock('@ottabase/ottaorm/models', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@ottabase/ottaorm/models')>()),
     User: { find: userFind },
     OrganizationMember: { where: memberWhere },
+    // No factors: the two-factor flag is read through the same seam.
+    Authenticator: { hasTwoFactor: async () => false },
 }));
 
 const TEST_SECRET = 'test-secret-at-least-32-chars-long!!';

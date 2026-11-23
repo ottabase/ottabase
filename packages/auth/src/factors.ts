@@ -1,54 +1,42 @@
 // ============================================================
-// @ottabase/auth - Passkeys, two-factor sign-in and the person's own factors
+// @ottabase/auth - The signed-in person's own sign-in factors
 // ============================================================
 //
-// Routes (all under /api/auth, all answered by `handleAuthRequest`):
+// Routes (all under /api/auth, answered by `handleAuthRequest` through `handleFactorRequest`):
 //
-//   POST   /passkey/options                 sign-in options for a passkey (anyone)
-//   POST   /callback/passkey                sign in with a passkey (anyone)
-//   GET    /two-factor/challenge            is a sign-in waiting on a second factor?
-//   POST   /two-factor/challenge            finish it: { code } | { recoveryCode } | { passkey }
-//   POST   /two-factor/passkey-options      options to finish it with a passkey
-//   GET    /factors                         the signed-in person's passkeys and authenticator app
+//   GET    /factors                         the person's two-factor state and passkeys
 //   POST   /factors/totp                    start authenticator-app setup: { secret, uri }
-//   POST   /factors/totp/confirm            first code turns it on: { recoveryCodes }
-//   DELETE /factors/totp                    turn it off
-//   POST   /factors/recovery-codes          a fresh set: { recoveryCodes }
+//   POST   /factors/totp/confirm            first code turns it on: { success, recoveryCodes? }
+//   DELETE /factors/totp                    remove the authenticator app
+//   POST   /factors/recovery-codes          a fresh set: { success, recoveryCodes }
 //   POST   /factors/passkeys/options        options to add a passkey
-//   POST   /factors/passkeys                add it: { credential, name }
+//   POST   /factors/passkeys                add it: { credential, name } -> { success, passkey, recoveryCodes? }
 //   PATCH  /factors/passkeys/:id            rename: { name }
 //   DELETE /factors/passkeys/:id            remove
 //
-// Every change to a factor needs a RECENT sign-in (the session is under 15 minutes old): a stolen
-// session cookie must not be able to add its own passkey or turn the authenticator app off. The
-// answer otherwise is 403 `REAUTH_REQUIRED`, and the app sends the person to sign in again.
+// The sign-in side (passkey sign-in, the second-factor challenge) is in two-factor.ts, which
+// shares the helpers exported here.
 //
-// Codes are guessable in principle (a million of them), so wrong codes and recovery codes are
-// counted per person in KV: after five in fifteen minutes the challenge answers 429 until the
-// window passes. The count is a read then a write, not atomic: requests sent in parallel all see
-// the same count, and KV is eventually consistent across colos. The hard bound on parallel guessing
-// is the host's per-IP rate limit on these routes (otta-web's `two-factor` bucket), and every
-// guess needs the pending cookie, which only a correct password, magic link or OAuth sign-in gives.
+// Two-factor is ON when the person has a confirmed authenticator app OR at least one passkey.
+// Recovery codes are handed out when it first turns on (the confirm or the first passkey answers
+// with `recoveryCodes`), can be regenerated, and are deleted when the last factor goes.
+//
+// Every change to a factor needs a RECENT sign-in (`authAt` on the session under 15 minutes old):
+// a stolen session cookie must not be able to add its own passkey or remove the app. The answer
+// otherwise is 403 `REAUTH_REQUIRED`, and the app sends the person to sign in again. Removing the
+// last factor while the active organization's policy requires two-factor is 409
+// `TWO_FACTOR_REQUIRED`.
 //
 // ============================================================
 
-import { userKey } from '@ottabase/cf/cache-keys';
-import { Authenticator, User, VerificationToken, type AuthenticatorType } from '@ottabase/ottaorm/models';
-import { redactErrorForLog } from '@ottabase/utils/http-errors';
+import { Authenticator, VerificationToken, type AuthenticatorType } from '@ottabase/ottaorm/models';
+import { errorResponse, redactErrorForLog } from '@ottabase/utils/http-errors';
 import { base64UrlEncode, hashToken, randomBytes } from './crypto';
 import { ensureOrmConnection, jsonResponse, requireCsrf, resolveFrontendUrl } from './http';
 import { bumpProfileVersion, getSession, readSessionIdentity, resolveAuthSecret } from './session-store';
-import {
-    announce,
-    authorizedUserFrom,
-    clearPendingSecondFactorCookie,
-    completeSignIn,
-    jsonForOutcome,
-    readPendingSecondFactor,
-    signInOrChallenge,
-} from './sign-in';
+import { announce } from './sign-in';
 import { base32Encode, generateTotpSecret, matchTotpStep, openSecret, sealSecret, totpUri } from './totp';
-import type { AuthEnv, CreateAuthConfigOptions } from './types';
+import type { AuthEnv, CreateAuthConfigOptions, UserFactorChangedEvent } from './types';
 import {
     newChallenge,
     readChallenge,
@@ -63,23 +51,49 @@ import {
     type RelyingParty,
 } from './webauthn';
 
-/** How old a session may be and still change a factor. */
+/** How old a sign-in may be and still change a factor. */
 export const RECENT_SIGN_IN_MS = 15 * 60 * 1000;
 const CHALLENGE_MS = 5 * 60 * 1000;
-const WEBAUTHN_TIMEOUT_MS = 5 * 60 * 1000;
-const FAILURE_LIMIT = 5;
-const FAILURE_WINDOW_SECONDS = 15 * 60;
+export const WEBAUTHN_TIMEOUT_MS = 5 * 60 * 1000;
 const RECOVERY_CODE_COUNT = 10;
+/** 16 base32 characters (80 bits), shown as `xxxx-xxxx-xxxx-xxxx`. */
+const RECOVERY_CODE_LENGTH = 16;
 /** Recovery codes do not expire; a far-future expiry keeps them out of every cleanup. */
 const RECOVERY_CODE_EXPIRES = Date.UTC(9999, 0, 1);
 const PASSKEY_NAME_MAX = 60;
 
-type Body = Record<string, unknown>;
+export type Body = Record<string, unknown>;
 
-async function readBody(request: Request): Promise<Body> {
+export async function readBody(request: Request): Promise<Body> {
     const body = await request.json().catch(() => ({}));
     return body && typeof body === 'object' ? (body as Body) : {};
 }
+
+/** Every failure here: a message for people and a stable `code` for programs. */
+export const fail = (message: string, status: number, code: string): Response =>
+    errorResponse(message, status, { code });
+
+export const reauthRequired = () =>
+    fail('Sign in again to change how you sign in. It keeps a borrowed session from doing it.', 403, 'REAUTH_REQUIRED');
+
+export const passkeysUnavailable = () =>
+    fail(
+        'Passkeys need the app at a domain name over https (or localhost in development).',
+        400,
+        'PASSKEYS_UNAVAILABLE',
+    );
+
+export const tooManyAttempts = () =>
+    fail('Too many tries. Wait a while and try again, or use a passkey.', 429, 'TOO_MANY_ATTEMPTS');
+
+export const secondFactorInvalid = () => fail('That code did not work. Try again.', 401, 'SECOND_FACTOR_INVALID');
+
+export const authenticatorUnreadable = () =>
+    fail(
+        'Your authenticator app can no longer be read. Use a recovery code or a passkey, then set the app up again.',
+        409,
+        'AUTHENTICATOR_UNREADABLE',
+    );
 
 function appName(env: AuthEnv, options: CreateAuthConfigOptions): string {
     if (options.appName) return options.appName;
@@ -90,7 +104,7 @@ function appName(env: AuthEnv, options: CreateAuthConfigOptions): string {
     }
 }
 
-function relyingParty(env: AuthEnv, options: CreateAuthConfigOptions): RelyingParty | null {
+export function relyingParty(env: AuthEnv, options: CreateAuthConfigOptions): RelyingParty | null {
     return relyingPartyFor(resolveFrontendUrl(env), appName(env, options));
 }
 
@@ -106,14 +120,14 @@ function userHandle(userId: string): string {
 
 // ---------- WebAuthn challenges: single-use rows in verification_tokens ----------
 
-const challengeIdentifier = {
+export const challengeIdentifier = {
     signIn: 'webauthn:signin',
     register: (userId: string) => `webauthn:register:${userId}`,
     factor: (userId: string) => `webauthn:factor:${userId}`,
 };
 
-async function issueChallenge(identifier: string): Promise<string> {
-    await VerificationToken.deleteExpiredFor(identifier).catch(() => {});
+export async function issueChallenge(identifier: string): Promise<string> {
+    await VerificationToken.deleteExpiredFor(identifier);
     const challenge = newChallenge();
     await VerificationToken.create({
         identifier,
@@ -124,7 +138,7 @@ async function issueChallenge(identifier: string): Promise<string> {
 }
 
 /** The challenge a response answers, consumed (so it works once) and unexpired, or null. */
-async function consumeChallenge(identifier: string, clientDataJSON: unknown): Promise<string | null> {
+export async function consumeChallenge(identifier: string, clientDataJSON: unknown): Promise<string | null> {
     const challenge = readChallenge(clientDataJSON);
     if (!challenge) return null;
     const row = await VerificationToken.consumeByIdentifierAndToken(identifier, await hashToken(challenge));
@@ -133,7 +147,16 @@ async function consumeChallenge(identifier: string, clientDataJSON: unknown): Pr
     return Number.isFinite(expires) && expires >= Date.now() ? challenge : null;
 }
 
-function requestOptions(rp: RelyingParty, challenge: string, passkeys: AuthenticatorType[] = []) {
+export function parseTransports(raw: string | null): string[] {
+    try {
+        const parsed = JSON.parse(raw ?? '[]');
+        return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+export function requestOptions(rp: RelyingParty, challenge: string, passkeys: AuthenticatorType[] = []) {
     return {
         challenge,
         rpId: rp.id,
@@ -147,24 +170,21 @@ function requestOptions(rp: RelyingParty, challenge: string, passkeys: Authentic
     };
 }
 
-function parseTransports(raw: string | null): string[] {
-    try {
-        const parsed = JSON.parse(raw ?? '[]');
-        return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : [];
-    } catch {
-        return [];
-    }
-}
-
-/** Check a passkey assertion against the passkey it names; bumps its counter. Throws WebAuthnError. */
-async function checkPasskey(
+/**
+ * Check a passkey assertion against the passkey it names and move its counter forward. When
+ * `ownerId` is given (the second-factor challenge), a passkey of anyone else is refused BEFORE its
+ * signature is checked or its counter touched. Throws WebAuthnError.
+ */
+export async function checkPasskey(
     response: AuthenticationResponseJSON,
     rp: RelyingParty,
     challenge: string,
+    ownerId?: string,
 ): Promise<AuthenticatorType> {
     const credentialId = typeof response?.id === 'string' ? response.id : '';
     const stored = credentialId ? await Authenticator.findPasskey(credentialId) : null;
     if (!stored || !stored.publicKey || stored.algorithm == null) throw new WebAuthnError('credential-unknown');
+    if (ownerId !== undefined && stored.userId !== ownerId) throw new WebAuthnError('credential-unknown');
     const handle = response.response?.userHandle;
     if (handle && handle !== userHandle(stored.userId)) throw new WebAuthnError('user-handle-mismatch');
     const { counter } = await verifyAuthentication(response, rp, challenge, {
@@ -172,296 +192,209 @@ async function checkPasskey(
         algorithm: stored.algorithm as CoseAlgorithm,
         counter: Number(stored.counter) || 0,
     });
-    await Authenticator.touchPasskey(stored.id, counter);
+    // Two assertions racing with the same counter: only one moves it.
+    if (!(await Authenticator.touchPasskey(stored.id, counter))) throw new WebAuthnError('counter-replayed');
     return stored;
 }
 
-function logRefused(event: string, error: unknown): void {
+export function logRefused(event: string, error: unknown): void {
     const reason = error instanceof WebAuthnError ? error.reason : undefined;
     console.warn(JSON.stringify({ event, ...(reason ? { reason } : { error: redactErrorForLog(error) }) }));
 }
 
-// ---------- failed-attempt counter ----------
+// ---------- the authenticator-app secret ----------
 
-function failuresKey(userId: string): string {
-    return userKey('auth', userId, 'factor-failures');
+/** The key TOTP secrets are sealed under: AUTH_FACTOR_KEY when set, else AUTH_SECRET. */
+function factorKey(env: AuthEnv): string {
+    return env.AUTH_FACTOR_KEY || resolveAuthSecret(env);
 }
 
-/** Fails closed: without KV the attempts cannot be counted, so none are allowed. */
-async function tooManyFailures(env: AuthEnv, userId: string): Promise<boolean> {
-    if (!env.OBCF_KV) return true;
-    const count = Number(await env.OBCF_KV.get(failuresKey(userId))) || 0;
-    return count >= FAILURE_LIMIT;
+/**
+ * The plaintext secret of a sealed authenticator app, or null when it cannot be opened (the key
+ * changed since it was sealed). Logged; the caller answers 409 `AUTHENTICATOR_UNREADABLE`.
+ */
+export async function openTotpSecret(env: AuthEnv, sealed: string): Promise<string | null> {
+    const key = factorKey(env);
+    try {
+        return await openSecret(key, sealed);
+    } catch (error) {
+        console.warn(JSON.stringify({ event: 'auth_totp_secret_unreadable', error: redactErrorForLog(error) }));
+        return null;
+    }
 }
 
-async function recordFailure(env: AuthEnv, userId: string): Promise<void> {
-    if (!env.OBCF_KV) return;
-    const count = (Number(await env.OBCF_KV.get(failuresKey(userId))) || 0) + 1;
-    await env.OBCF_KV.put(failuresKey(userId), String(count), { expirationTtl: FAILURE_WINDOW_SECONDS });
+/** Does `code` match the app now, and is its step unused? Accepting it spends the step. */
+export async function acceptTotpCode(totp: AuthenticatorType, secret: string, code: unknown): Promise<boolean> {
+    const step = typeof code === 'string' ? await matchTotpStep(secret, code) : null;
+    return step !== null && (await Authenticator.acceptTotpStep(totp.id, step));
 }
 
-async function clearFailures(env: AuthEnv, userId: string): Promise<void> {
-    await env.OBCF_KV?.delete(failuresKey(userId)).catch(() => {});
+// ---------- attempt limits ----------
+
+const ATTEMPT_LIMIT_PER_SIGN_IN = 5;
+const ATTEMPT_LIMIT_PER_ACCOUNT = 30;
+const ACCOUNT_ATTEMPT_WINDOW_MS = 60 * 60 * 1000;
+
+const attemptIdentifier = {
+    signIn: (pendingJti: string) => `factor-attempt:${pendingJti}`,
+    account: (userId: string) => `factor-attempt-account:${userId}`,
+};
+
+/**
+ * Count one guess (a code or a recovery code) and say whether it must be refused unchecked: more
+ * than five against this pending sign-in, or more than thirty against the account in an hour.
+ * Rows in verification_tokens, inserted then counted, so parallel guesses cannot all slip under
+ * the limit (see VerificationToken.recordAttempts). `pending` is absent at setup confirm, where
+ * only the account limit applies. A passkey is never counted.
+ */
+export async function attemptRefused(userId: string, pending?: { jti: string; expiresAt: number }): Promise<boolean> {
+    const scopes = [
+        {
+            identifier: attemptIdentifier.account(userId),
+            expires: Date.now() + ACCOUNT_ATTEMPT_WINDOW_MS,
+            limit: ATTEMPT_LIMIT_PER_ACCOUNT,
+        },
+        ...(pending
+            ? [
+                  {
+                      identifier: attemptIdentifier.signIn(pending.jti),
+                      expires: pending.expiresAt,
+                      limit: ATTEMPT_LIMIT_PER_SIGN_IN,
+                  },
+              ]
+            : []),
+    ];
+    const counts = await VerificationToken.recordAttempts(scopes);
+    return counts.some((count, i) => count > scopes[i].limit);
 }
 
-const tooManyResponse = () =>
-    jsonResponse(
-        { error: 'Too many wrong codes. Wait fifteen minutes and try again.', code: 'TOO_MANY_ATTEMPTS' },
-        429,
-    );
+/** A guess succeeded: the person starts from zero on both counters. */
+export async function clearAttempts(userId: string, pendingJti?: string): Promise<void> {
+    await Promise.all([
+        VerificationToken.deleteByIdentifier(attemptIdentifier.account(userId)),
+        pendingJti ? VerificationToken.deleteByIdentifier(attemptIdentifier.signIn(pendingJti)) : null,
+    ]);
+}
 
 // ---------- recovery codes ----------
 
-const recoveryIdentifier = (userId: string) => `recovery:${userId}`;
+export const recoveryIdentifier = (userId: string) => `recovery:${userId}`;
 
 /** Lowercase, no separators: what the person typed, however they typed it. */
-function normalizeRecoveryCode(code: string): string {
-    return code.toLowerCase().replace(/[^a-z0-9]/g, '');
+export function normalizeRecoveryCode(code: string): string | null {
+    const normalized = code.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return normalized.length === RECOVERY_CODE_LENGTH ? normalized : null;
 }
 
 /** Replace the person's recovery codes; returns the new ones, shown once and stored only hashed. */
 async function issueRecoveryCodes(userId: string): Promise<string[]> {
-    const identifier = recoveryIdentifier(userId);
-    await VerificationToken.deleteByIdentifier(identifier);
-    const codes: string[] = [];
-    for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
-        const raw = base32Encode(randomBytes(7)).slice(0, 10).toLowerCase();
-        codes.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
-        await VerificationToken.create({
-            identifier,
-            token: await hashToken(normalizeRecoveryCode(raw)),
-            expires: RECOVERY_CODE_EXPIRES,
-        });
-    }
-    return codes;
+    const codes = Array.from({ length: RECOVERY_CODE_COUNT }, () =>
+        // 10 random bytes are exactly 16 base32 characters.
+        base32Encode(randomBytes(10)).toLowerCase(),
+    );
+    const hashes = await Promise.all(codes.map((code) => hashToken(code)));
+    await VerificationToken.replaceForIdentifier(recoveryIdentifier(userId), hashes, RECOVERY_CODE_EXPIRES);
+    return codes.map((code) => code.match(/.{4}/g)!.join('-'));
 }
 
-/**
- * Turn a person's two-factor sign-in off on someone else's say-so: an organization manager
- * resetting a member who lost their phone. Removes the authenticator app and the recovery codes,
- * refreshes their live sessions' snapshot, and announces it. Authorization is the caller's job.
- */
-export async function resetTwoFactor(
-    userId: string,
-    env: AuthEnv,
-    options: CreateAuthConfigOptions = {},
-): Promise<{ removed: boolean }> {
-    ensureOrmConnection(env);
-    const removed = await Authenticator.removeTotp(userId);
-    await VerificationToken.deleteByIdentifier(recoveryIdentifier(userId));
-    await bumpProfileVersion(userId, env, options);
-    if (removed) {
-        await announce(env, options, 'user.factor.changed', {
-            userId,
-            factor: 'totp',
-            change: 'removed',
-            at: Date.now(),
-        });
-    }
-    return { removed };
-}
-
-// ---------- the second factor itself ----------
-
-/**
- * Does the submitted proof belong to this person? A code from their authenticator app (each step
- * accepted once), one of their recovery codes (consumed), or one of their passkeys.
- */
-async function verifySecondFactor(
-    userId: string,
-    body: Body,
-    env: AuthEnv,
-    options: CreateAuthConfigOptions,
-): Promise<boolean> {
-    if (typeof body.code === 'string') {
-        const totp = await Authenticator.totpFor(userId);
-        if (!totp?.secret || totp.confirmedAt == null) return false;
-        const secret = await openSecret(resolveAuthSecret(env), totp.secret);
-        const step = await matchTotpStep(secret, body.code);
-        return step !== null && (await Authenticator.acceptTotpStep(totp.id, step));
-    }
-    if (typeof body.recoveryCode === 'string') {
-        const normalized = normalizeRecoveryCode(body.recoveryCode);
-        if (normalized.length !== 10) return false;
-        const used = await VerificationToken.consumeByIdentifierAndToken(
-            recoveryIdentifier(userId),
-            await hashToken(normalized),
-        );
-        if (used)
-            await announce(env, options, 'user.factor.changed', {
-                userId,
-                factor: 'recovery-codes',
-                change: 'removed',
-                at: Date.now(),
-            });
-        return !!used;
-    }
-    if (body.passkey && typeof body.passkey === 'object') {
-        const rp = relyingParty(env, options);
-        if (!rp) return false;
-        const response = body.passkey as AuthenticationResponseJSON;
-        const challenge = await consumeChallenge(challengeIdentifier.factor(userId), response.response?.clientDataJSON);
-        if (!challenge) return false;
-        try {
-            const passkey = await checkPasskey(response, rp, challenge);
-            return passkey.userId === userId;
-        } catch (error) {
-            logRefused('auth_second_factor_passkey_refused', error);
-            return false;
-        }
-    }
-    return false;
-}
-
-async function handleChallengeState(request: Request, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const userId = await readPendingSecondFactor(request, env);
-    if (!userId) return jsonResponse({ pending: false });
-    const passkeys = (await Authenticator.listForUser(userId)).filter((row) => row.kind === 'passkey');
-    return jsonResponse({
-        pending: true,
-        passkey: passkeys.length > 0 && !!relyingParty(env, options),
-        recoveryCodes: (await VerificationToken.countByIdentifier(recoveryIdentifier(userId))) > 0,
+/** Put a consumed recovery code back (its sign-in failed after the code was spent). */
+export async function restoreRecoveryCode(userId: string, hash: string): Promise<void> {
+    await VerificationToken.create({
+        identifier: recoveryIdentifier(userId),
+        token: hash,
+        expires: RECOVERY_CODE_EXPIRES,
     });
 }
 
-async function handleChallenge(request: Request, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const body = await readBody(request);
-    const rejected = await requireCsrf(request, env, body.csrfToken);
-    if (rejected) return rejected;
-
-    const userId = await readPendingSecondFactor(request, env);
-    if (!userId) {
-        return jsonResponse({ error: 'This sign-in expired. Start again.', code: 'SECOND_FACTOR_EXPIRED' }, 401);
-    }
-    if (await tooManyFailures(env, userId)) return tooManyResponse();
-
-    if (!(await verifySecondFactor(userId, body, env, options))) {
-        await recordFailure(env, userId);
-        return jsonResponse({ error: 'That code did not work. Try again.', code: 'SECOND_FACTOR_INVALID' }, 401);
-    }
-    await clearFailures(env, userId);
-
-    const user = await User.find(userId);
-    if (!user) return jsonResponse({ error: 'This sign-in expired. Start again.', code: 'SECOND_FACTOR_EXPIRED' }, 401);
-    const completed = await completeSignIn(authorizedUserFrom(user), env, request, options);
-    return jsonForOutcome(completed ? { kind: 'session', ...completed } : { kind: 'failed' }, [
-        clearPendingSecondFactorCookie(env, request),
-    ]);
-}
-
-async function handleChallengePasskeyOptions(request: Request, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const body = await readBody(request);
-    const rejected = await requireCsrf(request, env, body.csrfToken);
-    if (rejected) return rejected;
-    const userId = await readPendingSecondFactor(request, env);
-    const rp = relyingParty(env, options);
-    if (!userId || !rp) return jsonResponse({ error: 'No passkey sign-in is waiting.' }, 400);
-    const passkeys = (await Authenticator.listForUser(userId)).filter((row) => row.kind === 'passkey');
-    if (passkeys.length === 0) return jsonResponse({ error: 'No passkey sign-in is waiting.' }, 400);
-    return jsonResponse(requestOptions(rp, await issueChallenge(challengeIdentifier.factor(userId)), passkeys));
-}
-
-// ---------- passkey sign-in ----------
-
-const passkeysUnavailable = () =>
-    jsonResponse(
-        {
-            error: 'Passkeys need the app at a domain name over https (or localhost in development).',
-            code: 'PASSKEYS_UNAVAILABLE',
-        },
-        400,
-    );
-
-async function handlePasskeySignInOptions(request: Request, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const body = await readBody(request);
-    const rejected = await requireCsrf(request, env, body.csrfToken);
-    if (rejected) return rejected;
-    const rp = relyingParty(env, options);
-    if (!rp) return passkeysUnavailable();
-    // No allow-list: the browser offers whichever of this site's passkeys the person picks.
-    return jsonResponse(requestOptions(rp, await issueChallenge(challengeIdentifier.signIn)));
-}
-
-async function handlePasskeySignIn(request: Request, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const body = await readBody(request);
-    const rejected = await requireCsrf(request, env, body.csrfToken);
-    if (rejected) return rejected;
-    const rp = relyingParty(env, options);
-    if (!rp) return passkeysUnavailable();
-
-    const refused = () => jsonResponse({ error: 'That passkey could not sign you in.', code: 'PASSKEY_REFUSED' }, 401);
-    const response = body.credential as AuthenticationResponseJSON | undefined;
-    if (!response || typeof response !== 'object') return refused();
-    const challenge = await consumeChallenge(challengeIdentifier.signIn, response.response?.clientDataJSON);
-    if (!challenge) return refused();
-
-    let passkey: AuthenticatorType;
-    try {
-        passkey = await checkPasskey(response, rp, challenge);
-    } catch (error) {
-        logRefused('auth_passkey_sign_in_refused', error);
-        return refused();
-    }
-    const user = await User.find(passkey.userId);
-    if (!user) return refused();
-    const authorized = authorizedUserFrom(user);
-    if (options.requireVerifiedEmail && !authorized.emailVerified) {
-        return jsonResponse({ error: 'Please verify your email before signing in' }, 401);
-    }
-    return jsonForOutcome(await signInOrChallenge(authorized, env, request, options, 'passkey'));
-}
-
-// ---------- the person's own factors ----------
+// ---------- recent sign-in ----------
 
 interface Caller {
     userId: string;
     email: string;
     name: string | null;
     recentSignIn: boolean;
-    recentUntil: number;
+    /** When the recent-sign-in window closes, epoch ms; null when the session never signed in. */
+    recentUntil: number | null;
+    /** When the active organization's policy requires two-factor from; null when none does. */
+    requiredFrom: number | null;
 }
 
 async function resolveCaller(request: Request, env: AuthEnv, options: CreateAuthConfigOptions): Promise<Caller | null> {
-    const session = await getSession(request, env, options);
-    const identity = await readSessionIdentity(request, env);
+    const [session, identity] = await Promise.all([
+        getSession(request, env, options),
+        readSessionIdentity(request, env),
+    ]);
     if (!session || !identity || identity.userId !== session.user.id) return null;
-    const recentUntil = identity.createdMs + RECENT_SIGN_IN_MS;
+    // `authAt` is stamped by a real sign-in only, and a reissued session copies it: neither a
+    // fresh cookie nor a password change moves the window.
+    const recentUntil = identity.authAt !== null ? identity.authAt + RECENT_SIGN_IN_MS : null;
     return {
         userId: session.user.id,
         email: session.user.email,
         name: (session.user.name as string | null) ?? null,
-        recentSignIn: identity.createdMs > 0 && Date.now() < recentUntil,
+        recentSignIn: recentUntil !== null && Date.now() < recentUntil,
         recentUntil,
+        requiredFrom: session.user.twoFactorRequiredFrom ?? null,
     };
 }
 
-const reauthRequired = () =>
-    jsonResponse(
-        {
-            error: 'Sign in again to change how you sign in. It keeps a borrowed session from doing it.',
-            code: 'REAUTH_REQUIRED',
-        },
-        403,
+/**
+ * Null when this request's session signed in within the last 15 minutes, else the answer to send:
+ * 401 `UNAUTHORIZED` without a session, 403 `REAUTH_REQUIRED` with an older one. For a host route
+ * as sensitive as a factor change (an administrator resetting someone's two-factor).
+ */
+export async function requireRecentSignIn(
+    request: Request,
+    env: AuthEnv,
+    options: CreateAuthConfigOptions = {},
+): Promise<Response | null> {
+    const caller = await resolveCaller(request, env, options);
+    if (!caller) return fail('Unauthorized', 401, 'UNAUTHORIZED');
+    return caller.recentSignIn ? null : reauthRequired();
+}
+
+// ---------- the person's factors ----------
+
+/** What a person's factor rows add up to. */
+function factorState(rows: AuthenticatorType[]) {
+    const totp = rows.find((row) => row.kind === 'totp') ?? null;
+    const passkeys = rows.filter((row) => row.kind === 'passkey');
+    const totpOn = !!totp && totp.confirmedAt != null;
+    return { totp, totpOn, passkeys, enabled: totpOn || passkeys.length > 0 };
+}
+
+/** A policy of the active organization requires two-factor now. */
+const policyApplies = (caller: Caller) => caller.requiredFrom !== null && Date.now() >= caller.requiredFrom;
+
+const twoFactorRequired = () =>
+    fail(
+        'Your organization requires two-factor sign-in, so the last way to give it cannot be removed. Add another first.',
+        409,
+        'TWO_FACTOR_REQUIRED',
     );
 
 async function factorSummary(caller: Caller, env: AuthEnv, options: CreateAuthConfigOptions) {
-    const rows = await Authenticator.listForUser(caller.userId);
-    const totp = rows.find((row) => row.kind === 'totp');
+    const [rows, recoveryCodesLeft] = await Promise.all([
+        Authenticator.listForUser(caller.userId),
+        VerificationToken.countByIdentifier(recoveryIdentifier(caller.userId)),
+    ]);
+    const state = factorState(rows);
     return {
         twoFactor: {
-            enabled: !!totp && totp.confirmedAt != null,
-            pending: !!totp && totp.confirmedAt == null,
-            recoveryCodesLeft: await VerificationToken.countByIdentifier(recoveryIdentifier(caller.userId)),
+            enabled: state.enabled,
+            totp: state.totpOn,
+            totpPending: !!state.totp && !state.totpOn,
+            passkeys: state.passkeys.length,
+            recoveryCodesLeft,
+            requiredFrom: caller.requiredFrom,
         },
-        passkeys: rows
-            .filter((row) => row.kind === 'passkey')
-            .map((row) => ({
-                id: row.id,
-                name: row.name ?? 'Passkey',
-                createdAt: row.createdAt,
-                lastUsedAt: row.lastUsedAt ?? null,
-                transports: parseTransports(row.transports),
-            })),
+        passkeys: state.passkeys.map((row) => ({
+            id: row.id,
+            name: row.name ?? 'Passkey',
+            createdAt: row.createdAt,
+            lastUsedAt: row.lastUsedAt ?? null,
+            transports: parseTransports(row.transports),
+        })),
         passkeysAvailable: !!relyingParty(env, options),
         recentSignIn: caller.recentSignIn,
         recentSignInUntil: caller.recentSignIn ? caller.recentUntil : null,
@@ -469,15 +402,55 @@ async function factorSummary(caller: Caller, env: AuthEnv, options: CreateAuthCo
 }
 
 async function factorChanged(
-    caller: Caller,
+    userId: string,
     env: AuthEnv,
     options: CreateAuthConfigOptions,
-    factor: 'totp' | 'passkey' | 'recovery-codes',
-    change: 'added' | 'removed' | 'regenerated',
+    factor: UserFactorChangedEvent['factor'],
+    change: UserFactorChangedEvent['change'],
 ): Promise<void> {
     // The two-factor flag rides in every live session's snapshot: re-read it on the next request.
-    if (factor === 'totp') await bumpProfileVersion(caller.userId, env, options).catch(() => {});
-    await announce(env, options, 'user.factor.changed', { userId: caller.userId, factor, change, at: Date.now() });
+    if (factor !== 'recovery-codes') {
+        await bumpProfileVersion(userId, env, options).catch((error) => {
+            console.warn(
+                JSON.stringify({ event: 'auth_profile_version_bump_failed', error: redactErrorForLog(error) }),
+            );
+        });
+    }
+    await announce(env, options, 'user.factor.changed', { userId, factor, change, at: Date.now() });
+}
+
+/** Two-factor just turned off: the recovery codes go with it. */
+async function lastFactorRemoved(userId: string): Promise<void> {
+    await VerificationToken.deleteByIdentifier(recoveryIdentifier(userId));
+}
+
+/**
+ * Turn a person's two-factor sign-in off on someone else's say-so: an organization manager
+ * resetting a member who lost their device. Removes every factor (authenticator app, passkeys,
+ * recovery codes), refreshes their live sessions' snapshot, and announces it
+ * (`factor: 'all', change: 'removed'`). Authorization is the caller's job; pair it with
+ * `requireRecentSignIn` on the administrator's request.
+ */
+export async function resetTwoFactor(
+    userId: string,
+    env: AuthEnv,
+    options: CreateAuthConfigOptions = {},
+): Promise<{ removed: boolean }> {
+    ensureOrmConnection(env);
+    const [removedFactors, removedCodes] = await Promise.all([
+        Authenticator.removeAllForUser(userId),
+        VerificationToken.deleteByIdentifier(recoveryIdentifier(userId)),
+    ]);
+    await bumpProfileVersion(userId, env, options);
+    const removed = removedFactors + removedCodes > 0;
+    if (removed)
+        await announce(env, options, 'user.factor.changed', {
+            userId,
+            factor: 'all',
+            change: 'removed',
+            at: Date.now(),
+        });
+    return { removed };
 }
 
 async function handleFactors(
@@ -498,7 +471,7 @@ async function handleFactors(
     if (!known) return null;
 
     const caller = await resolveCaller(request, env, options);
-    if (!caller) return jsonResponse({ error: 'Unauthorized' }, 401);
+    if (!caller) return fail('Unauthorized', 401, 'UNAUTHORIZED');
     if (method === 'GET') return jsonResponse(await factorSummary(caller, env, options));
 
     const body = await readBody(request);
@@ -506,59 +479,57 @@ async function handleFactors(
     if (rejected) return rejected;
     if (!caller.recentSignIn) return reauthRequired();
 
+    const state = factorState(await Authenticator.listForUser(caller.userId));
+
     if (what === 'totp' && id === undefined && method === 'POST') {
-        if (await Authenticator.hasTwoFactor(caller.userId)) {
-            return jsonResponse({ error: 'Two-factor sign-in is already on.', code: 'ALREADY_ENABLED' }, 409);
-        }
+        const alreadyOn = () => fail('An authenticator app is already set up.', 409, 'ALREADY_ENABLED');
+        if (state.totpOn) return alreadyOn();
         const secret = generateTotpSecret();
-        await Authenticator.beginTotp(caller.userId, await sealSecret(resolveAuthSecret(env), secret));
+        if (!(await Authenticator.beginTotp(caller.userId, await sealSecret(factorKey(env), secret)))) {
+            return alreadyOn();
+        }
         return jsonResponse({ secret, uri: totpUri({ secret, account: caller.email, issuer: appName(env, options) }) });
     }
 
     if (what === 'totp' && id === 'confirm') {
-        const totp = await Authenticator.totpFor(caller.userId);
-        if (!totp?.secret || totp.confirmedAt != null) {
-            return jsonResponse({ error: 'Start the setup again.', code: 'NO_PENDING_SETUP' }, 409);
-        }
-        if (await tooManyFailures(env, caller.userId)) return tooManyResponse();
-        const secret = await openSecret(resolveAuthSecret(env), totp.secret);
-        const step = typeof body.code === 'string' ? await matchTotpStep(secret, body.code) : null;
-        if (step === null || !(await Authenticator.acceptTotpStep(totp.id, step))) {
-            await recordFailure(env, caller.userId);
-            return jsonResponse(
-                {
-                    error: 'That code did not match. Check the time on your phone and try the next one.',
-                    code: 'CODE_INVALID',
-                },
-                400,
+        if (!state.totp?.secret || state.totpOn) return fail('Start the setup again.', 409, 'NO_PENDING_SETUP');
+        const secret = await openTotpSecret(env, state.totp.secret);
+        if (secret === null) return fail('Start the setup again.', 409, 'AUTHENTICATOR_UNREADABLE');
+        if (await attemptRefused(caller.userId)) return tooManyAttempts();
+        if (!(await acceptTotpCode(state.totp, secret, body.code))) {
+            return fail(
+                'That code did not match. Check the time on your phone and try the next one.',
+                401,
+                'SECOND_FACTOR_INVALID',
             );
         }
-        await clearFailures(env, caller.userId);
-        const recoveryCodes = await issueRecoveryCodes(caller.userId);
-        await factorChanged(caller, env, options, 'totp', 'added');
-        return jsonResponse({ success: true, recoveryCodes });
+        await clearAttempts(caller.userId);
+        // Recovery codes come with two-factor turning on, not with every factor added.
+        const recoveryCodes = state.enabled ? undefined : await issueRecoveryCodes(caller.userId);
+        await factorChanged(caller.userId, env, options, 'totp', 'added');
+        return jsonResponse({ success: true, ...(recoveryCodes ? { recoveryCodes } : {}) });
     }
 
     if (what === 'totp' && method === 'DELETE') {
+        if (!state.totp) return fail('No authenticator app is set up.', 404, 'NOT_FOUND');
+        const lastFactor = state.totpOn && state.passkeys.length === 0;
+        if (lastFactor && policyApplies(caller)) return twoFactorRequired();
         await Authenticator.removeTotp(caller.userId);
-        await VerificationToken.deleteByIdentifier(recoveryIdentifier(caller.userId));
-        await factorChanged(caller, env, options, 'totp', 'removed');
+        if (lastFactor) await lastFactorRemoved(caller.userId);
+        await factorChanged(caller.userId, env, options, 'totp', 'removed');
         return jsonResponse({ success: true });
     }
 
     if (what === 'recovery-codes') {
-        if (!(await Authenticator.hasTwoFactor(caller.userId))) {
-            return jsonResponse({ error: 'Turn on two-factor sign-in first.', code: 'NOT_ENABLED' }, 409);
-        }
+        if (!state.enabled) return fail('Turn on two-factor sign-in first.', 409, 'NOT_ENABLED');
         const recoveryCodes = await issueRecoveryCodes(caller.userId);
-        await factorChanged(caller, env, options, 'recovery-codes', 'regenerated');
+        await factorChanged(caller.userId, env, options, 'recovery-codes', 'regenerated');
         return jsonResponse({ success: true, recoveryCodes });
     }
 
     if (what === 'passkeys' && id === 'options') {
         const rp = relyingParty(env, options);
         if (!rp) return passkeysUnavailable();
-        const existing = (await Authenticator.listForUser(caller.userId)).filter((row) => row.kind === 'passkey');
         return jsonResponse({
             challenge: await issueChallenge(challengeIdentifier.register(caller.userId)),
             rp: { id: rp.id, name: rp.name },
@@ -567,7 +538,7 @@ async function handleFactors(
             timeout: WEBAUTHN_TIMEOUT_MS,
             attestation: 'none',
             authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
-            excludeCredentials: existing.map((row) => ({
+            excludeCredentials: state.passkeys.map((row) => ({
                 type: 'public-key',
                 id: row.credentialId,
                 transports: parseTransports(row.transports),
@@ -579,8 +550,7 @@ async function handleFactors(
         const rp = relyingParty(env, options);
         if (!rp) return passkeysUnavailable();
         const response = body.credential as RegistrationResponseJSON | undefined;
-        const refused = () =>
-            jsonResponse({ error: 'That passkey could not be added. Try again.', code: 'PASSKEY_REFUSED' }, 400);
+        const refused = () => fail('That passkey could not be added. Try again.', 400, 'PASSKEY_REFUSED');
         if (!response || typeof response !== 'object') return refused();
         const challenge = await consumeChallenge(
             challengeIdentifier.register(caller.userId),
@@ -595,7 +565,7 @@ async function handleFactors(
             return refused();
         }
         if (await Authenticator.findPasskey(verified.credentialId)) {
-            return jsonResponse({ error: 'That passkey is already added.', code: 'PASSKEY_EXISTS' }, 409);
+            return fail('That passkey is already added.', 409, 'PASSKEY_EXISTS');
         }
         const name =
             typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, PASSKEY_NAME_MAX) : 'Passkey';
@@ -608,63 +578,44 @@ async function handleFactors(
             counter: verified.counter,
             transports: verified.transports,
         });
-        await factorChanged(caller, env, options, 'passkey', 'added');
-        return jsonResponse({ success: true, passkey: { id: row.id, name: row.name } });
+        const recoveryCodes = state.enabled ? undefined : await issueRecoveryCodes(caller.userId);
+        await factorChanged(caller.userId, env, options, 'passkey', 'added');
+        return jsonResponse({
+            success: true,
+            passkey: { id: row.id, name: row.name },
+            ...(recoveryCodes ? { recoveryCodes } : {}),
+        });
     }
 
     if (what === 'passkeys' && method === 'PATCH') {
         const name = typeof body.name === 'string' ? body.name.trim().slice(0, PASSKEY_NAME_MAX) : '';
-        if (!name) return jsonResponse({ error: 'Give the passkey a name.' }, 400);
+        if (!name) return fail('Give the passkey a name.', 400, 'VALIDATION_ERROR');
         const ok = await Authenticator.renamePasskey(caller.userId, id, name);
-        return ok ? jsonResponse({ success: true }) : jsonResponse({ error: 'Not found' }, 404);
+        return ok ? jsonResponse({ success: true }) : fail('Not found', 404, 'NOT_FOUND');
     }
 
     if (what === 'passkeys' && method === 'DELETE') {
-        const ok = await Authenticator.removePasskey(caller.userId, id);
-        if (!ok) return jsonResponse({ error: 'Not found' }, 404);
-        await factorChanged(caller, env, options, 'passkey', 'removed');
+        if (!state.passkeys.some((row) => row.id === id)) return fail('Not found', 404, 'NOT_FOUND');
+        const lastFactor = state.passkeys.length === 1 && !state.totpOn;
+        if (lastFactor && policyApplies(caller)) return twoFactorRequired();
+        if (!(await Authenticator.removePasskey(caller.userId, id))) return fail('Not found', 404, 'NOT_FOUND');
+        if (lastFactor) await lastFactorRemoved(caller.userId);
+        await factorChanged(caller.userId, env, options, 'passkey', 'removed');
         return jsonResponse({ success: true });
     }
 
     return null;
 }
 
-/** The passkey, second-factor and factor routes, or null for any other path. */
+/** The signed-in person's factor routes (`/factors/*`), or null for any other path. */
 export async function handleFactorRequest(
     request: Request,
     env: AuthEnv,
     options: CreateAuthConfigOptions,
     segments: string[],
 ): Promise<Response | null> {
-    const [action, param, ...rest] = segments;
-    const method = request.method;
-    const route =
-        (action === 'passkey' && param === 'options' && method === 'POST' && 'passkey-options') ||
-        (action === 'callback' && param === 'passkey' && method === 'POST' && 'passkey-sign-in') ||
-        (action === 'two-factor' && param === 'challenge' && (method === 'GET' || method === 'POST') && 'challenge') ||
-        (action === 'two-factor' && param === 'passkey-options' && method === 'POST' && 'challenge-passkey') ||
-        (action === 'factors' && 'factors') ||
-        null;
-    if (!route) return null;
-
+    const [action, ...rest] = segments;
+    if (action !== 'factors') return null;
     ensureOrmConnection(env);
-    switch (route) {
-        case 'passkey-options':
-            return handlePasskeySignInOptions(request, env, options);
-        case 'passkey-sign-in':
-            return handlePasskeySignIn(request, env, options);
-        case 'challenge':
-            return method === 'GET'
-                ? handleChallengeState(request, env, options)
-                : handleChallenge(request, env, options);
-        case 'challenge-passkey':
-            return handleChallengePasskeyOptions(request, env, options);
-        case 'factors':
-            return handleFactors(
-                request,
-                env,
-                options,
-                [param, ...rest].filter((s): s is string => s !== undefined),
-            );
-    }
+    return handleFactors(request, env, options, rest);
 }

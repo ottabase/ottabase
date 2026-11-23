@@ -25,6 +25,8 @@ vi.mock('@ottabase/ottaorm/models', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@ottabase/ottaorm/models')>()),
     User: { find: userFind },
     OrganizationMember: { where: memberWhere },
+    // No factors: the two-factor flag is read through the same seam.
+    Authenticator: { hasTwoFactor: async () => false },
 }));
 
 interface FakeGrant {
@@ -261,8 +263,18 @@ describe('KV eventual-consistency grace window', () => {
         (env.OBCF_KV as any).store.clear();
 
         const request = cookieHeaderRequest(`${SESSION_COOKIE_BASE}=${created.token}`);
-        // Within grace + no D1 to self-heal from -> still a valid session built from the JWT identity.
-        await expect(getSession(request, env)).resolves.not.toBeNull();
+        // Within grace: rebuilt from D1 (the seam above) and written back.
+        await expect(getSession(request, { ...env, OBCF_D1: {} as never })).resolves.not.toBeNull();
+        expect((env.OBCF_KV as any).store.size).toBeGreaterThan(0);
+    });
+
+    it('refuses a missing registry record when there is no D1 to rebuild it from', async () => {
+        const env = createEnv();
+        const created = await createSessionForUser({ id: 'user-1', email: 'u@e.com' }, env);
+        (env.OBCF_KV as any).store.clear();
+        // Without a snapshot the session's policy and roles are unknown: fail closed.
+        const request = cookieHeaderRequest(`${SESSION_COOKIE_BASE}=${created.token}`);
+        await expect(getSession(request, env)).resolves.toBeNull();
     });
 
     it('rejects a session past the grace window whose registry record is gone', async () => {

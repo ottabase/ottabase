@@ -29,11 +29,12 @@
 // ============================================================
 
 import { createD1Driver } from '@ottabase/db/drizzle-d1';
-import { userKey } from '@ottabase/cf/cache-keys';
+import { orgKey, userKey } from '@ottabase/cf/cache-keys';
 import { hmacSign } from './crypto';
 import { describeRequestDevice, type SessionDevice } from './device';
 import { registerConnection } from '@ottabase/ottaorm';
 import { Authenticator, OrganizationMember, PLATFORM_ADMIN_PERMISSION, User } from '@ottabase/ottaorm/models';
+import { redactErrorForLog } from '@ottabase/utils/http-errors';
 import { hasGrantedPermission } from '@ottabase/utils/permissions';
 import { SYSTEM_ORGANIZATION_ID, parseBooleanFlag } from './bootstrap';
 import { clearCookie, isHttpsRequest, parseCookies, serializeCookie } from './cookies';
@@ -161,6 +162,11 @@ function profileVersionKey(userId: string): string {
     return userKey('auth', userId, 'profile', 'version');
 }
 
+/** One counter per organization: a bump refreshes every live session working in it. */
+function orgVersionKey(organizationId: string): string {
+    return orgKey('auth', organizationId, 'version');
+}
+
 interface UserContext {
     organizationId: string | null;
     roles: string[];
@@ -174,10 +180,21 @@ interface UserContext {
     /** The person's formatting preferences, so emails, digests and cron can format without a D1 read. */
     timezone: string | null;
     locale: string | null;
-    /** An authenticator app is confirmed: password, magic-link and OAuth sign-ins ask for a code. */
+    /** Two-factor is on (an authenticator app or a passkey): password, magic-link and OAuth sign-ins are challenged. */
     twoFactor: boolean;
-    /** Epoch ms from which a policy (`secondFactorRequiredFrom`) requires two-factor; null when none does. */
+    /**
+     * Epoch ms from which a policy (`secondFactorRequiredFrom`) of the active organization requires
+     * two-factor; null when none does.
+     */
     twoFactorRequiredFrom: number | null;
+}
+
+/** What a snapshot build knows about the session itself (not the person). */
+interface SessionAuth {
+    /** How the session signed in, from the JWT; handed to the policy hook. */
+    signInMethod: string | null;
+    /** The two-factor flag when the caller already read it (a sign-in), saving the query. */
+    twoFactor?: boolean;
 }
 
 /**
@@ -194,6 +211,8 @@ interface RegistrySnapshot {
     c: number;
     /** profile version this snapshot reflects. */
     v: number;
+    /** organization version (of `organizationId`) this snapshot reflects. */
+    ov: number;
     organizationId: string | null;
     roles: string[];
     permissions: string[];
@@ -210,35 +229,42 @@ interface RegistrySnapshot {
 }
 
 /**
- * Two-factor state for the snapshot. The policy hook's failure propagates: a sign-in then fails
- * closed, and a stale snapshot keeps its previous value (refreshSnapshotIfStale) rather than
- * dropping a requirement because a lookup failed once.
+ * Two-factor state for the snapshot, for the session's active organization. Every failure (the
+ * factor lookup, the policy hook) propagates: a sign-in then fails closed, and a stale snapshot
+ * keeps its previous value (refreshSnapshotIfStale) rather than dropping a requirement because a
+ * lookup failed once.
  */
 async function loadTwoFactorState(
     userId: string,
+    organizationId: string | null,
+    auth: SessionAuth,
     env: AuthEnv,
     options?: CreateAuthConfigOptions,
 ): Promise<{ twoFactor: boolean; twoFactorRequiredFrom: number | null }> {
-    let twoFactor = false;
-    try {
-        twoFactor = await Authenticator.hasTwoFactor(userId);
-    } catch {
-        // The authenticators table may not exist yet (pre-migration): nobody has a factor then.
-    }
-    const requiredFrom = options?.secondFactorRequiredFrom ? await options.secondFactorRequiredFrom(env, userId) : null;
+    const [twoFactor, requiredFrom] = await Promise.all([
+        auth.twoFactor ?? Authenticator.hasTwoFactor(userId),
+        options?.secondFactorRequiredFrom
+            ? options.secondFactorRequiredFrom(env, { userId, organizationId, signInMethod: auth.signInMethod })
+            : null,
+    ]);
     return {
         twoFactor,
         twoFactorRequiredFrom: typeof requiredFrom === 'number' && Number.isFinite(requiredFrom) ? requiredFrom : null,
     };
 }
 
-async function loadUserContext(userId: string, env: AuthEnv, options?: CreateAuthConfigOptions): Promise<UserContext> {
+async function loadUserContext(
+    userId: string,
+    auth: SessionAuth,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<UserContext> {
     ensureOrmConnection(env);
 
     // Load the user once up front; reused below for roles/createdAt and for the persisted
     // active organization.
     const user = await User.find(userId).catch((error) => {
-        console.warn('Failed to load user for session context:', error);
+        console.warn(JSON.stringify({ event: 'auth_session_user_load_failed', error: redactErrorForLog(error) }));
         return null;
     });
 
@@ -343,7 +369,7 @@ async function loadUserContext(userId: string, env: AuthEnv, options?: CreateAut
             }
         }
     } catch (error) {
-        console.warn('Failed to load user roles/permissions for session:', error);
+        console.warn(JSON.stringify({ event: 'auth_session_roles_load_failed', error: redactErrorForLog(error) }));
     }
 
     return {
@@ -357,7 +383,28 @@ async function loadUserContext(userId: string, env: AuthEnv, options?: CreateAut
         emailVerified,
         timezone,
         locale,
-        ...(await loadTwoFactorState(userId, env, options)),
+        ...(await loadTwoFactorState(userId, organizationId, auth, env, options)),
+    };
+}
+
+/** A registry snapshot of freshly loaded context. */
+function snapshotFrom(context: UserContext, createdMs: number, version: number, orgVersion: number): RegistrySnapshot {
+    return {
+        c: createdMs,
+        v: version,
+        ov: orgVersion,
+        organizationId: context.organizationId,
+        roles: context.roles,
+        permissions: context.permissions,
+        platformAdmin: context.platformAdmin,
+        createdAt: context.createdAt,
+        name: context.name,
+        image: context.image,
+        emailVerified: context.emailVerified,
+        timezone: context.timezone,
+        locale: context.locale,
+        twoFactor: context.twoFactor,
+        twoFactorRequiredFrom: context.twoFactorRequiredFrom,
     };
 }
 
@@ -374,6 +421,20 @@ export interface CreateSessionInput {
     emailVerified?: number | null;
     /** Device facts shown on the sessions page; `createSessionCookieForUser` fills them from the request. */
     device?: SessionDevice | null;
+    /**
+     * When the person proved who they are, epoch ms. Pass `Date.now()` when this session IS a
+     * sign-in (an SSO callback, say), or the old session's value when reissuing one (read it with
+     * `readSessionIdentity`). Never defaulted: without it the session is not a recent sign-in and
+     * cannot change sign-in factors.
+     */
+    authAt?: number | null;
+    /** How the session signed in (`password`, `sso:<connectionId>`...). Stored on the session, immutable. */
+    signInMethod?: string | null;
+    /**
+     * The two-factor flag when the caller already read it (a sign-in did), so session creation
+     * does not query it again. Internal to the sign-in tail; leave it unset elsewhere.
+     */
+    twoFactorEnabled?: boolean;
 }
 
 export interface CreatedSession {
@@ -392,6 +453,12 @@ async function readProfileVersion(userId: string, env: AuthEnv): Promise<number>
     } catch {
         return 0;
     }
+}
+
+/** The organization's version counter (0 when never bumped or no organization). */
+async function readOrgVersion(organizationId: string | null, env: AuthEnv): Promise<number> {
+    if (!env.OBCF_KV || !organizationId) return 0;
+    return Number(await env.OBCF_KV.get(orgVersionKey(organizationId))) || 0;
 }
 
 /**
@@ -449,12 +516,16 @@ export async function createSessionForUser(
         throw new Error('Session store (OBCF_KV) is not bound; cannot create a session');
     }
 
-    const context = await loadUserContext(input.id, env, options);
+    const signInMethod = input.signInMethod ?? null;
+    const context = await loadUserContext(input.id, { signInMethod, twoFactor: input.twoFactorEnabled }, env, options);
 
     const maxAgeSeconds = resolveSessionMaxAge(env, options);
     const jti = crypto.randomUUID();
     const secret = resolveAuthSecret(env);
-    const profileVersion = await readProfileVersion(input.id, env);
+    const [profileVersion, orgVersion] = await Promise.all([
+        readProfileVersion(input.id, env),
+        readOrgVersion(context.organizationId, env),
+    ]);
     const createdMs = Date.now();
 
     // The cookie JWT carries only identity + small display fields. Roles/permissions
@@ -470,26 +541,18 @@ export async function createSessionForUser(
         createdAt: context.createdAt,
         profileVersion,
         cms: createdMs,
+        ...(typeof input.authAt === 'number' && input.authAt > 0 ? { authAt: input.authAt } : {}),
+        ...(signInMethod ? { signInMethod } : {}),
     };
 
     const token = await signJwt(payload, secret, { expiresInSeconds: maxAgeSeconds });
     const expiresAt = createdMs + maxAgeSeconds * 1000;
 
     const snapshot: RegistrySnapshot = {
-        c: createdMs,
-        v: profileVersion,
-        organizationId: context.organizationId,
-        roles: context.roles,
-        permissions: context.permissions,
-        platformAdmin: context.platformAdmin,
-        createdAt: context.createdAt,
+        ...snapshotFrom(context, createdMs, profileVersion, orgVersion),
         name: input.name ?? null,
         image: input.image ?? null,
         emailVerified: input.emailVerified ?? null,
-        timezone: context.timezone,
-        locale: context.locale,
-        twoFactor: context.twoFactor,
-        twoFactorRequiredFrom: context.twoFactorRequiredFrom,
     };
 
     const metadata: SessionMetadata = {
@@ -508,7 +571,9 @@ export async function createSessionForUser(
         try {
             await writeRegistrySnapshot(input.id, jti, snapshot, maxAgeSeconds, env, metadata);
         } catch (retryError) {
-            console.error('Failed to persist session registry record:', retryError);
+            console.error(
+                JSON.stringify({ event: 'auth_session_registry_write_failed', error: redactErrorForLog(retryError) }),
+            );
             throw new Error('Failed to persist session; sign-in aborted');
         }
     }
@@ -574,6 +639,7 @@ function parseSnapshot(raw: string | null): RegistrySnapshot | null {
         return {
             c: Number(parsed.c) || 0,
             v: Number(parsed.v) || 0,
+            ov: Number(parsed.ov) || 0,
             organizationId: parsed.organizationId ?? null,
             roles: Array.isArray(parsed.roles) ? parsed.roles : [],
             permissions: Array.isArray(parsed.permissions) ? parsed.permissions : [],
@@ -593,36 +659,34 @@ function parseSnapshot(raw: string | null): RegistrySnapshot | null {
     }
 }
 
-/** Refresh a stale snapshot (profile/role change) from D1 exactly once, rewriting the registry record. */
+/**
+ * Refresh a stale snapshot from D1 exactly once, rewriting the registry record. Stale means the
+ * person's profile version moved (a profile, role or factor change) or their organization's did
+ * (a policy change for everyone in it). A failed refresh keeps the old snapshot.
+ */
 async function refreshSnapshotIfStale(
     userId: string,
     jti: string,
     snapshot: RegistrySnapshot,
-    currentVersion: number,
+    versions: { profile: number; org: number },
+    auth: SessionAuth,
     env: AuthEnv,
     options?: CreateAuthConfigOptions,
     metadata?: SessionMetadata | null,
 ): Promise<RegistrySnapshot> {
     if (!env.OBCF_KV || !env.OBCF_D1) return snapshot;
-    if (currentVersion <= snapshot.v) return snapshot;
+    if (versions.profile <= snapshot.v && versions.org <= snapshot.ov) return snapshot;
 
     try {
-        const context = await loadUserContext(userId, env, options);
+        const context = await loadUserContext(userId, auth, env, options);
+        // A refresh that changed the active organization reflects that organization's version.
+        const orgVersion =
+            context.organizationId === snapshot.organizationId
+                ? versions.org
+                : await readOrgVersion(context.organizationId, env);
         const refreshed: RegistrySnapshot = {
-            c: snapshot.c,
-            v: currentVersion,
-            organizationId: context.organizationId,
-            roles: context.roles,
-            permissions: context.permissions,
-            platformAdmin: context.platformAdmin,
+            ...snapshotFrom(context, snapshot.c, versions.profile, orgVersion),
             createdAt: context.createdAt ?? snapshot.createdAt,
-            name: context.name,
-            image: context.image,
-            emailVerified: context.emailVerified,
-            timezone: context.timezone,
-            locale: context.locale,
-            twoFactor: context.twoFactor,
-            twoFactorRequiredFrom: context.twoFactorRequiredFrom,
         };
         // Rewrite so the version matches and subsequent requests skip the D1 read. The device
         // metadata rides along, or the sessions page would lose it on the first profile edit.
@@ -631,7 +695,9 @@ async function refreshSnapshotIfStale(
         );
         return refreshed;
     } catch (error) {
-        console.warn('Failed to refresh session snapshot from D1:', error);
+        console.warn(
+            JSON.stringify({ event: 'auth_session_snapshot_refresh_failed', error: redactErrorForLog(error) }),
+        );
         return snapshot;
     }
 }
@@ -658,9 +724,9 @@ function buildUser(payload: SessionTokenPayload, snapshot: RegistrySnapshot | nu
 }
 
 /**
- * True when a policy requires two-factor of this person, its date has come, and they have not
- * turned it on. Such a session reaches the auth routes only (`/api/auth/*`: the session read,
- * the setup, sign-out) until they do.
+ * True when a policy of the active organization requires two-factor of this person, its date has
+ * come, and they have not turned it on. Such a session reaches the auth routes (`/api/auth/*`: the
+ * session read, the setup, sign-out) and `/api/users/me` (to switch organization) until they do.
  */
 function twoFactorSetupRequired(snapshot: RegistrySnapshot | null, now = Date.now()): boolean {
     return (
@@ -681,46 +747,81 @@ function twoFactorFields(
     };
 }
 
-/** The paths a session that still owes two-factor setup may reach. */
+/**
+ * The paths a session that still owes two-factor setup may reach: the auth routes, and the
+ * person's own record (`/api/users/me`, exactly), where they can switch to an organization that
+ * does not require it.
+ */
 function allowedBeforeTwoFactorSetup(request: Request): boolean {
     try {
-        return new URL(request.url).pathname.startsWith('/api/auth/');
+        const path = new URL(request.url).pathname;
+        return path.startsWith('/api/auth/') || path === '/api/users/me';
     } catch {
         return false;
     }
 }
 
 /**
+ * Why `getSession` refused a signed, unexpired cookie: `revoked` (signed out from another device,
+ * or a password change) or `two-factor-setup` (confined until a policy's two-factor is on).
+ */
+export type SessionRefusal = 'revoked' | 'two-factor-setup';
+
+/** What `getSession` concluded about each request it saw: a refusal reason, or null. */
+const refusals = new WeakMap<Request, SessionRefusal | null>();
+
+/**
+ * Why `getSession` refused THIS request's session: a reason, null when it accepted it or refused
+ * it for no reason worth telling (no cookie, expired), or undefined when it never saw the request
+ * (the caller then probes with `wasSessionRevoked` / `isTwoFactorSetupPending`). Lets a 401
+ * handler say why without repeating the KV reads.
+ */
+export function sessionRefusal(request: Request): SessionRefusal | null | undefined {
+    return refusals.get(request);
+}
+
+/**
  * Resolve the current session from a request's cookies.
  *
- * Hot path: JWT signature + expiry check, then a single parallel batch of 4 KV reads
- * (bulk-revocation marker, per-session sign-out tombstone, registry snapshot, and the
- * profile-version counter). No database read unless a profile-version bump flags the
- * snapshot stale, or a freshly-issued session's registry record has not yet propagated
- * (self-healed from D1 within the grace window).
+ * Hot path: JWT signature + expiry check, then a single parallel batch of 5 KV reads
+ * (bulk-revocation marker, per-session sign-out tombstone, registry snapshot, the
+ * profile-version counter and the organization-version counter). No database read unless a
+ * version bump flags the snapshot stale, or a freshly-issued session's registry record has not
+ * yet propagated (self-healed from D1 within the grace window).
  */
 export async function getSession(
     request: Request,
     env: AuthEnv,
     options?: CreateAuthConfigOptions,
 ): Promise<Session | null> {
+    const { session, refusal } = await resolveSession(request, env, options);
+    refusals.set(request, refusal);
+    return session;
+}
+
+async function resolveSession(
+    request: Request,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<{ session: Session | null; refusal: SessionRefusal | null }> {
+    const none = { session: null, refusal: null };
     const cookies = parseCookies(request.headers.get('Cookie'));
     const token = cookies[resolveSessionCookieName(env)];
-    if (!token) return null;
+    if (!token) return none;
 
     let payload: SessionTokenPayload | null;
     try {
         payload = await verifyJwt<SessionTokenPayload>(token, resolveAuthSecret(env));
     } catch {
-        return null;
+        return none;
     }
-    if (!payload || !payload.sub || !payload.jti) return null;
+    if (!payload || !payload.sub || !payload.jti) return none;
 
     // Revocation is enforced via KV and MUST fail closed: without KV we cannot know
     // whether a captured JWT was signed out, so we refuse to trust it.
     if (!env.OBCF_KV) {
         console.error('[auth] OBCF_KV is not bound; refusing to trust session tokens without revocation checks.');
-        return null;
+        return none;
     }
 
     // `cms` is the ms-granular creation time every issued token carries; `iat` is second-
@@ -729,34 +830,43 @@ export async function getSession(
     const iatMs = (Number(payload.iat) || 0) * 1000;
     const createdMsClaim = Number(payload.cms) || 0;
 
-    // One parallel batch for the whole hot path: bulk-revocation marker, per-session
-    // sign-out tombstone, registry snapshot, and the profile-version counter. All keys
-    // are known upfront from the verified payload, so this is a single KV round trip.
+    const auth: SessionAuth = {
+        signInMethod: typeof payload.signInMethod === 'string' ? payload.signInMethod : null,
+    };
+    const issuedOrgId = typeof payload.organizationId === 'string' ? payload.organizationId : null;
+
+    // One parallel batch for the whole hot path: bulk-revocation marker, per-session sign-out
+    // tombstone, registry snapshot, the profile-version counter and the version counter of the
+    // organization the session was issued in. All keys are known upfront from the verified
+    // payload, so this is a single KV round trip.
     let revokedSinceRaw: string | null;
     let tombstoneRaw: string | null;
     let registryRaw: string | null;
     let registryMetadata: SessionMetadata | null;
     let profileVersionRaw: string | null;
+    let orgVersionRaw: string | null;
     try {
-        const [revokedSince, tombstone, registry, profileVersion] = await Promise.all([
+        const [revokedSince, tombstone, registry, profileVersion, orgVersion] = await Promise.all([
             env.OBCF_KV.get(revokedSinceKey(payload.sub)),
             env.OBCF_KV.get(revokedJtiKey(payload.sub, payload.jti)),
             env.OBCF_KV.getWithMetadata<SessionMetadata>(sessionRegistryKey(payload.sub, payload.jti)),
             env.OBCF_KV.get(profileVersionKey(payload.sub)),
+            issuedOrgId ? env.OBCF_KV.get(orgVersionKey(issuedOrgId)) : null,
         ]);
         revokedSinceRaw = revokedSince;
         tombstoneRaw = tombstone;
         registryRaw = registry.value;
         registryMetadata = registry.metadata ?? null;
         profileVersionRaw = profileVersion;
+        orgVersionRaw = orgVersion;
     } catch (error) {
         // A transient KV read error must not silently trust the token.
-        console.warn('Failed to read session revocation state; failing closed:', error);
-        return null;
+        console.warn(JSON.stringify({ event: 'auth_session_state_read_failed', error: redactErrorForLog(error) }));
+        return none;
     }
 
     // Single sign-out tombstone -- always wins, even inside the grace window.
-    if (tombstoneRaw) return null;
+    if (tombstoneRaw) return { session: null, refusal: 'revoked' };
 
     const currentVersion = Number(profileVersionRaw || 0) || 0;
     let snapshot = parseSnapshot(registryRaw);
@@ -765,15 +875,32 @@ export async function getSession(
     if (revokedSinceRaw) {
         const revokedAtMs = Number(revokedSinceRaw);
         const createdMs = snapshot?.c || createdMsClaim;
-        if (Number.isFinite(revokedAtMs) && createdMs > 0 && createdMs < revokedAtMs) return null;
+        if (Number.isFinite(revokedAtMs) && createdMs > 0 && createdMs < revokedAtMs) {
+            return { session: null, refusal: 'revoked' };
+        }
     }
 
     if (snapshot) {
+        // The batch read the version of the organization the session was issued in. A session
+        // that switched organization since reads its current one's (one more KV read).
+        // ponytail: one extra read per request after an org switch, until the next sign-in.
+        let orgVersion = Number(orgVersionRaw) || 0;
+        if (snapshot.organizationId !== issuedOrgId) {
+            try {
+                orgVersion = await readOrgVersion(snapshot.organizationId, env);
+            } catch (error) {
+                console.warn(
+                    JSON.stringify({ event: 'auth_session_state_read_failed', error: redactErrorForLog(error) }),
+                );
+                return none;
+            }
+        }
         snapshot = await refreshSnapshotIfStale(
             payload.sub,
             payload.jti,
             snapshot,
-            currentVersion,
+            { profile: currentVersion, org: orgVersion },
+            auth,
             env,
             options,
             registryMetadata,
@@ -782,44 +909,34 @@ export async function getSession(
         // No registry record. Either (a) freshly issued and not yet propagated across
         // colos / registry write is catching up, or (b) signed out / expired.
         const ageSeconds = iatMs > 0 ? (Date.now() - iatMs) / 1000 : Number.POSITIVE_INFINITY;
-        if (ageSeconds > REGISTRY_GRACE_SECONDS) return null;
+        if (ageSeconds > REGISTRY_GRACE_SECONDS) return none;
 
-        // Within grace: self-heal by loading the context from D1 and re-writing the
-        // registry record so later requests hit the fast path.
-        if (env.OBCF_D1) {
-            let context: UserContext;
-            try {
-                context = await loadUserContext(payload.sub, env, options);
-            } catch (error) {
-                console.warn('Failed to load session context; failing closed:', error);
-                return null;
-            }
-            snapshot = {
-                c: createdMsClaim || Date.now(),
-                v: currentVersion,
-                organizationId: context.organizationId,
-                roles: context.roles,
-                permissions: context.permissions,
-                platformAdmin: context.platformAdmin,
-                createdAt: context.createdAt,
-                name: context.name,
-                image: context.image,
-                emailVerified: context.emailVerified,
-                timezone: context.timezone,
-                locale: context.locale,
-                twoFactor: context.twoFactor,
-                twoFactorRequiredFrom: context.twoFactorRequiredFrom,
-            };
-            await writeRegistrySnapshot(payload.sub, payload.jti, snapshot, resolveSessionMaxAge(env, options), env, {
-                c: snapshot.c,
-                e: Number(payload.exp) * 1000,
-            }).catch(() => {});
+        // Within grace: self-heal by loading the context from D1 and re-writing the registry
+        // record so later requests hit the fast path. Without D1 there is no snapshot to judge
+        // the session by (its organization's two-factor policy, its roles), so it is refused.
+        if (!env.OBCF_D1) return none;
+        try {
+            const context = await loadUserContext(payload.sub, auth, env, options);
+            const orgVersion =
+                context.organizationId === issuedOrgId
+                    ? Number(orgVersionRaw) || 0
+                    : await readOrgVersion(context.organizationId, env);
+            snapshot = snapshotFrom(context, createdMsClaim || Date.now(), currentVersion, orgVersion);
+        } catch (error) {
+            console.warn(JSON.stringify({ event: 'auth_session_context_failed', error: redactErrorForLog(error) }));
+            return none;
         }
+        await writeRegistrySnapshot(payload.sub, payload.jti, snapshot, resolveSessionMaxAge(env, options), env, {
+            c: snapshot.c,
+            e: Number(payload.exp) * 1000,
+        }).catch(() => {});
     }
 
-    if (twoFactorSetupRequired(snapshot) && !allowedBeforeTwoFactorSetup(request)) return null;
+    if (twoFactorSetupRequired(snapshot) && !allowedBeforeTwoFactorSetup(request)) {
+        return { session: null, refusal: 'two-factor-setup' };
+    }
 
-    return { user: buildUser(payload, snapshot), expires: (payload.exp ?? 0) * 1000 };
+    return { session: { user: buildUser(payload, snapshot), expires: (payload.exp ?? 0) * 1000 }, refusal: null };
 }
 
 /**
@@ -852,6 +969,22 @@ export async function bumpProfileVersion(
     });
 }
 
+/**
+ * Make every live session working in this organization re-read its snapshot on its next request:
+ * one KV write for a change that affects all its members (a two-factor policy, say), instead of
+ * one profile-version bump per member.
+ */
+export async function bumpOrganizationVersion(
+    organizationId: string,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<void> {
+    if (!env.OBCF_KV) return;
+    await env.OBCF_KV.put(orgVersionKey(organizationId), String(Date.now()), {
+        expirationTtl: resolveSessionMaxAge(env, options),
+    });
+}
+
 /** Revoke a single session (used by normal sign-out). Fails loudly so callers can surface it. */
 export async function revokeSession(
     userId: string,
@@ -865,7 +998,7 @@ export async function revokeSession(
     // drop the allow-list snapshot. The tombstone TTL covers the max session lifetime.
     await env.OBCF_KV.put(revokedJtiKey(userId, jti), '1', { expirationTtl: maxAgeSeconds });
     await env.OBCF_KV.delete(sessionRegistryKey(userId, jti)).catch((error) => {
-        console.warn('Failed to delete session registry record on sign-out:', error);
+        console.warn(JSON.stringify({ event: 'auth_session_registry_delete_failed', error: redactErrorForLog(error) }));
     });
 }
 
@@ -908,22 +1041,36 @@ export async function sessionPublicId(jti: string, env: AuthEnv): Promise<string
     return (await hmacSign(`sess:${jti}`, resolveAuthSecret(env))).slice(0, 22);
 }
 
-/** `{ userId, jti }` of the caller's cookie after signature + expiry checks, or null. No KV read. */
-export async function readSessionIdentity(
-    request: Request,
-    env: AuthEnv,
-): Promise<{ userId: string; jti: string; createdMs: number } | null> {
+/** What a session cookie says about itself, read without KV (see `readSessionIdentity`). */
+export interface SessionIdentity {
+    userId: string;
+    jti: string;
+    /** When the session was issued, epoch ms. */
+    createdMs: number;
+    /** When the person last proved who they are (a real sign-in), epoch ms; null when never. */
+    authAt: number | null;
+    /** How the session signed in; null for a session minted without one. */
+    signInMethod: string | null;
+}
+
+/**
+ * The caller's cookie after signature + expiry checks, or null. No KV read, so it says nothing
+ * about revocation: pair it with `getSession`.
+ */
+export async function readSessionIdentity(request: Request, env: AuthEnv): Promise<SessionIdentity | null> {
     const token = parseCookies(request.headers.get('Cookie'))[resolveSessionCookieName(env)];
     if (!token) return null;
     try {
         const payload = await verifyJwt<SessionTokenPayload>(token, resolveAuthSecret(env));
-        return payload?.sub && payload.jti
-            ? {
-                  userId: payload.sub,
-                  jti: payload.jti,
-                  createdMs: Number(payload.cms) || (Number(payload.iat) || 0) * 1000,
-              }
-            : null;
+        if (!payload?.sub || !payload.jti) return null;
+        const authAt = Number(payload.authAt);
+        return {
+            userId: payload.sub,
+            jti: payload.jti,
+            createdMs: Number(payload.cms) || (Number(payload.iat) || 0) * 1000,
+            authAt: Number.isFinite(authAt) && authAt > 0 ? authAt : null,
+            signInMethod: typeof payload.signInMethod === 'string' ? payload.signInMethod : null,
+        };
     } catch {
         return null;
     }

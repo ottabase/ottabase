@@ -69,5 +69,5 @@ export const packages: PackageRegistry<CloudflareEnv> = {
     env: () => resolved().env(),
     envDeclarations: () => resolved().envDeclarations(),
     report: (incident) => resolved().report(incident),
-    secondFactorRequiredFrom: (env, userId) => resolved().secondFactorRequiredFrom(env, userId),
+    secondFactorRequiredFrom: (env, input) => resolved().secondFactorRequiredFrom(env, input),
 };

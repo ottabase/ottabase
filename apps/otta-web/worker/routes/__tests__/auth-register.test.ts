@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { handleAuthRegister, handleVerifyEmail } from '../auth';
+import { handleAuthRegister, handlePasswordChange, handleVerifyEmail } from '../auth';
 
 const mocks = vi.hoisted(() => ({
     userFirst: vi.fn(),
@@ -10,19 +10,25 @@ const mocks = vi.hoisted(() => ({
     sendDemoWelcomeEmail: vi.fn(),
     emitAccountEvent: vi.fn(),
     consumeToken: vi.fn(),
+    userFind: vi.fn(),
+    getSession: vi.fn(),
+    readSessionIdentity: vi.fn(),
+    verifyPassword: vi.fn(),
+    createSessionCookieForUser: vi.fn(),
 }));
 
 vi.mock('@ottabase/auth/backend', () => ({
     completeSignIn: vi.fn(async () => ({ cookie: 'session=jwt', session: {} })),
-    createSessionCookieForUser: vi.fn(),
-    getSession: vi.fn(),
+    createSessionCookieForUser: mocks.createSessionCookieForUser,
+    getSession: mocks.getSession,
     handleAuthRequest: vi.fn(),
     hashPassword: vi.fn(async () => 'hashed-password'),
     hashToken: vi.fn(),
     requestLocaleDefaults: vi.fn(() => ({ timezone: null, locale: null })),
     requireCsrf: vi.fn(async () => null),
     revokeAllUserSessions: vi.fn(),
-    verifyPassword: vi.fn(),
+    verifyPassword: mocks.verifyPassword,
+    readSessionIdentity: mocks.readSessionIdentity,
 }));
 
 vi.mock('@ottabase/auth/config', () => ({
@@ -47,6 +53,8 @@ vi.mock('@ottabase/ottaorm/models', () => ({
         first: mocks.userFirst,
         create: mocks.userCreate,
         delete: mocks.userDelete,
+        find: mocks.userFind,
+        imageUrl: () => null,
     },
     VerificationToken: { consumeByIdentifierAndToken: mocks.consumeToken },
 }));
@@ -241,5 +249,52 @@ describe('account events from the app’s own auth routes', () => {
         expect(mocks.emitAccountEvent).toHaveBeenCalledTimes(1);
         expect(user.save).toHaveBeenCalledTimes(1);
         expect(values.emailVerified).toBe(first);
+    });
+});
+
+describe('handlePasswordChange', () => {
+    it('reissues the session with the old sign-in time, so the password does not reopen the factor window', async () => {
+        vi.clearAllMocks();
+        mocks.enforceRateLimit.mockResolvedValue(null);
+        mocks.getSession.mockResolvedValue({ user: { id: 'user-1' } });
+        mocks.readSessionIdentity.mockResolvedValue({
+            userId: 'user-1',
+            jti: 'old',
+            createdMs: 1,
+            authAt: 1_000,
+            signInMethod: 'password',
+        });
+        const values: Record<string, unknown> = { id: 'user-1', email: 'a@example.com', passwordHash: 'old-hash' };
+        mocks.userFind.mockResolvedValue({
+            get: (key: string) => values[key],
+            set: (key: string, value: unknown) => {
+                values[key] = value;
+            },
+            save: vi.fn(),
+            toJson: () => ({ ...values }),
+        });
+        // The current password matches; the new one differs from it.
+        mocks.verifyPassword.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+        mocks.createSessionCookieForUser.mockResolvedValue({ cookie: 'session=new', session: {} });
+
+        const request = new Request('https://app.example.com/api/auth/password/change', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword: 'Old!Passw0rd', newPassword: 'N3w!Password' }),
+        });
+        const response = await handlePasswordChange({
+            request,
+            env: { OBCF_D1: {}, APP_ID: 'otta-web' } as any,
+            url: new URL(request.url),
+            withAuthCors: (value) => value,
+        });
+
+        expect(response.status).toBe(200);
+        expect(mocks.createSessionCookieForUser).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'user-1', authAt: 1_000, signInMethod: 'password' }),
+            expect.anything(),
+            request,
+            expect.anything(),
+        );
     });
 });

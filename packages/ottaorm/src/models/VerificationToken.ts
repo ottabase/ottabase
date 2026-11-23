@@ -2,7 +2,7 @@
 // @ottabase/ottaorm - VerificationToken Model
 // ============================================================
 
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { BaseModel, ModelFields, type PackageType } from '../base/BaseModel';
 import { verificationTokensTable } from './VerificationToken.schema';
 
@@ -162,10 +162,64 @@ export class VerificationToken extends BaseModel {
     static async countByIdentifier(identifier: string): Promise<number> {
         const db = this.getDriver().getDb();
         const rows = await db
-            .select({ token: verificationTokensTable.token })
+            .select({ count: sql<number>`count(*)` })
             .from(verificationTokensTable)
             .where(eq(verificationTokensTable.identifier, identifier));
-        return Array.isArray(rows) ? rows.length : 0;
+        return Number((Array.isArray(rows) ? rows[0] : rows)?.count) || 0;
+    }
+
+    /** How many unexpired tokens an identifier holds (attempts inside their window). */
+    static async countLiveByIdentifier(identifier: string): Promise<number> {
+        const db = this.getDriver().getDb();
+        const rows = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(verificationTokensTable)
+            .where(
+                and(
+                    eq(verificationTokensTable.identifier, identifier),
+                    gt(verificationTokensTable.expires, Date.now()),
+                ),
+            );
+        return Number((Array.isArray(rows) ? rows[0] : rows)?.count) || 0;
+    }
+
+    /**
+     * Replace every token of an identifier with these (already hashed) ones: a fresh set of
+     * recovery codes. Two statements, the insert one multi-row statement.
+     */
+    static async replaceForIdentifier(identifier: string, tokens: string[], expires: number): Promise<void> {
+        const db = this.getDriver().getDb();
+        await db.delete(verificationTokensTable).where(eq(verificationTokensTable.identifier, identifier));
+        if (tokens.length === 0) return;
+        await db.insert(verificationTokensTable).values(tokens.map((token) => ({ identifier, token, expires })));
+    }
+
+    /**
+     * Count one attempt against each of these identifiers, then answer how many live attempts
+     * each holds now, this one included. Insert-then-count is what makes a limit race-safe: of
+     * any number of parallel attempts, the k-th insert sees at least k rows, so no more than
+     * `limit` of them can see a count within the limit. Expired attempts are purged first.
+     */
+    static async recordAttempts(attempts: Array<{ identifier: string; expires: number }>): Promise<number[]> {
+        if (attempts.length === 0) return [];
+        const db = this.getDriver().getDb();
+        const identifiers = attempts.map((attempt) => attempt.identifier);
+        await db
+            .delete(verificationTokensTable)
+            .where(
+                and(
+                    inArray(verificationTokensTable.identifier, identifiers),
+                    lt(verificationTokensTable.expires, Date.now()),
+                ),
+            );
+        await db.insert(verificationTokensTable).values(
+            attempts.map((attempt) => ({
+                identifier: attempt.identifier,
+                token: crypto.randomUUID(),
+                expires: attempt.expires,
+            })),
+        );
+        return Promise.all(identifiers.map((identifier) => this.countLiveByIdentifier(identifier)));
     }
 
     /**

@@ -7,6 +7,7 @@ import {
     hashPassword,
     hashToken,
     passkeysAvailable,
+    readSessionIdentity,
     requestLocaleDefaults,
     requireCsrf,
     revokeAllUserSessions,
@@ -539,7 +540,10 @@ export async function handlePasswordChange(context: AuthRouteContext): Promise<R
     }
 
     // Re-issue a session for THIS device so the user stays signed in. The reissued session
-    // is created after the revocation marker, so it survives while all prior sessions die.
+    // is created after the revocation marker, so it survives while all prior sessions die. It
+    // keeps the old session's sign-in time and method: knowing the password is not a fresh
+    // sign-in, so it must not reopen the 15-minute window for changing sign-in factors.
+    const previous = await readSessionIdentity(request, env as any);
     const emailVerifiedRaw = user.get('emailVerified');
     const { cookie } = await createSessionCookieForUser(
         {
@@ -548,6 +552,8 @@ export async function handlePasswordChange(context: AuthRouteContext): Promise<R
             name: (user.get('name') as string | null) ?? null,
             image: User.imageUrl(user.toJson()),
             emailVerified: emailVerifiedRaw ? new Date(emailVerifiedRaw as any).getTime() : null,
+            authAt: previous?.userId === userId ? previous.authAt : null,
+            signInMethod: previous?.userId === userId ? previous.signInMethod : null,
         },
         env as any,
         request,
@@ -929,6 +935,8 @@ export async function handleAuthRegister(context: AuthRouteContext): Promise<Res
                 env as any,
                 request,
                 getAuthOptions(env),
+                // A brand-new account has no factor yet: nothing to read.
+                { signInMethod: 'register', twoFactorEnabled: false },
             );
             if (!signedIn) {
                 // The account and its workspace stand; only the session is missing, and signing in retries it.

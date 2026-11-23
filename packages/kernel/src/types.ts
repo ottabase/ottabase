@@ -105,11 +105,25 @@ export interface ErrorContribution<Env = unknown> {
  */
 export interface AuthContribution<Env = unknown> {
     /**
-     * Epoch ms from which this person must have two-factor sign-in on (an organization policy),
-     * or null. Called when a session snapshot is built, so keep it to one or two reads, and bump
-     * the person's profile version when the answer changes. A throw fails that sign-in closed.
+     * Epoch ms from which this person must have two-factor sign-in on while working in
+     * `organizationId` (their ACTIVE organization: a policy of one organization never confines
+     * someone working in another), or null. `signInMethod` is how the session signed in
+     * (`password`, `oauth:google`, `sso:<connectionId>`...), so a policy may exempt an identity
+     * provider that owns its own MFA. Called when a session snapshot is built, so keep it to one or
+     * two reads. When the answer changes for a whole organization, call `bumpOrganizationVersion`
+     * from `@ottabase/auth/backend` once; for one person, bump their profile version. A throw
+     * fails that sign-in closed.
      */
-    secondFactorRequiredFrom?: (env: Env, userId: string) => Promise<number | null>;
+    secondFactorRequiredFrom?: (env: Env, input: SecondFactorPolicyInput) => Promise<number | null>;
+}
+
+/** What `secondFactorRequiredFrom` is asked about: one session's person, organization and sign-in. */
+export interface SecondFactorPolicyInput {
+    userId: string;
+    /** The session's active organization, or null when it has none. */
+    organizationId: string | null;
+    /** How the session signed in, or null when it was minted without one. */
+    signInMethod: string | null;
 }
 
 /**
@@ -289,10 +303,11 @@ export interface PackageRegistry<Env = unknown> {
      */
     report(incident: ErrorIncident<Env>): Promise<void>;
     /**
-     * The earliest date any package requires two-factor of this person from, or null. Every
-     * contributor is asked; one that throws makes this throw, so the sign-in fails closed.
+     * The earliest date any package requires two-factor of this person from, in this organization,
+     * or null. Every contributor is asked; one that throws makes this throw, so the sign-in fails
+     * closed.
      */
-    secondFactorRequiredFrom(env: Env, userId: string): Promise<number | null>;
+    secondFactorRequiredFrom(env: Env, input: SecondFactorPolicyInput): Promise<number | null>;
 }
 
 export interface HealthReport {

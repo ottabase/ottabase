@@ -305,6 +305,8 @@ describe('register signs the new account in itself', () => {
             expect.anything(),
             expect.any(Request),
             expect.anything(),
+            // Stamped as a registration, with no factor to look up.
+            { signInMethod: 'register', twoFactorEnabled: false },
         );
     });
 

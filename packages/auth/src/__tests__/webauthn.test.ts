@@ -7,7 +7,7 @@ import {
     verifyRegistration,
     type RelyingParty,
 } from '../webauthn';
-import { createPasskey, encodeCbor, signIn } from './soft-authenticator';
+import { createPasskey, encodeCbor, signIn, type SoftAlgorithm } from './soft-authenticator';
 
 // The software authenticator in ./soft-authenticator.ts has its own CBOR encoder and DER writer,
 // so these round trips check the verifier against independent code. They are not a browser: the
@@ -16,7 +16,7 @@ import { createPasskey, encodeCbor, signIn } from './soft-authenticator';
 const rp: RelyingParty = { id: 'app.example.com', origin: 'https://app.example.com', name: 'Example' };
 const ctx = { rpId: rp.id, origin: rp.origin };
 
-async function registered(algorithm: -7 | -8 = -7) {
+async function registered(algorithm: SoftAlgorithm = -7) {
     const { passkey, response } = await createPasskey(ctx, 'reg-challenge', { algorithm });
     const verified = await verifyRegistration(response, rp, 'reg-challenge');
     return { passkey, verified };
@@ -73,11 +73,11 @@ describe('CBOR and DER', () => {
 });
 
 describe('verifyRegistration', () => {
-    it('accepts an ES256 and an Ed25519 passkey and keeps a JWK', async () => {
-        for (const algorithm of [-7, -8] as const) {
+    it('accepts an ES256, an Ed25519 and an RS256 passkey and keeps a JWK', async () => {
+        for (const algorithm of [-7, -8, -257] as const) {
             const { verified } = await registered(algorithm);
             expect(verified.algorithm).toBe(algorithm);
-            expect(verified.publicKey.kty).toBe(algorithm === -7 ? 'EC' : 'OKP');
+            expect(verified.publicKey.kty).toBe({ [-7]: 'EC', [-8]: 'OKP', [-257]: 'RSA' }[algorithm]);
             expect(verified.transports).toEqual(['internal']);
             expect(verified.counter).toBe(0);
         }
@@ -94,11 +94,16 @@ describe('verifyRegistration', () => {
         const wrongType = await createPasskey(ctx, 'reg-challenge', { type: 'webauthn.get' });
         await expect(verifyRegistration(wrongType.response, rp, 'reg-challenge')).rejects.toThrow('client-data-type');
     });
+
+    it('refuses a passkey made without user verification', async () => {
+        const { response } = await createPasskey(ctx, 'reg-challenge', { userVerified: false });
+        await expect(verifyRegistration(response, rp, 'reg-challenge')).rejects.toThrow('user-not-verified');
+    });
 });
 
 describe('verifyAuthentication', () => {
-    it('accepts a signature from the registered key, for ES256 and Ed25519', async () => {
-        for (const algorithm of [-7, -8] as const) {
+    it('accepts a signature from the registered key, for ES256, Ed25519 and RS256', async () => {
+        for (const algorithm of [-7, -8, -257] as const) {
             const { passkey, verified } = await registered(algorithm);
             const assertion = await signIn(passkey, ctx, 'sign-challenge');
             await expect(

@@ -10,13 +10,14 @@
 // ============================================================
 
 import { Account, User, VerificationToken } from '@ottabase/ottaorm/models';
-import { redactErrorForLog } from '@ottabase/utils/http-errors';
+import { errorResponse, redactErrorForLog } from '@ottabase/utils/http-errors';
 import { withNotice } from '@ottabase/utils/url';
 import { requestLocaleDefaults } from './request-locale';
 import { serializeCookie, parseCookies, clearCookie } from './cookies';
 import { verifyPassword, randomToken, getDummyPasswordHash, hashToken } from './crypto';
 import { createCsrfCookiePair } from './csrf';
 import { handleFactorRequest } from './factors';
+import { handleSignInFactorRequest } from './two-factor';
 import {
     csrfCookieName,
     ensureOrmConnection,
@@ -60,15 +61,24 @@ export type {
     AuthorizedUser,
     CreateAuthConfigOptions,
     CredentialsAuthorizeOptions,
+    SecondFactorPolicyInput,
     UserCreatedEvent,
+    UserFactorChangedEvent,
     UserVerifiedEvent,
 } from './types';
 export type { FirstUserBootstrapResult } from './bootstrap';
 export { hashPassword, verifyPassword, hashToken } from './crypto';
 export { requireCsrf } from './http';
-export { passkeysAvailable, RECENT_SIGN_IN_MS, resetTwoFactor } from './factors';
-export { completeSignIn, type CompletedSignIn } from './sign-in';
-export { bumpProfileVersion, isTwoFactorSetupPending } from './session-store';
+export { passkeysAvailable, RECENT_SIGN_IN_MS, requireRecentSignIn, resetTwoFactor } from './factors';
+export { completeSignIn, type CompletedSignIn, type CompleteSignInDetails, type SignInMethod } from './sign-in';
+export {
+    bumpOrganizationVersion,
+    bumpProfileVersion,
+    isTwoFactorSetupPending,
+    sessionRefusal,
+    type SessionIdentity,
+    type SessionRefusal,
+} from './session-store';
 export { bootstrapFirstUser, provisionPlatformOwnerOrganization } from './bootstrap';
 export {
     getSession,
@@ -240,7 +250,7 @@ async function handleCredentialsCallback(
     options: CreateAuthConfigOptions,
 ): Promise<Response> {
     if (options.disableCredentials) {
-        return jsonResponse({ error: 'Credentials sign-in is disabled' }, 403);
+        return errorResponse('Credentials sign-in is disabled', 403, { code: 'CREDENTIALS_DISABLED' });
     }
 
     const body = (await request.json().catch(() => ({}))) as { email?: string; password?: string; csrfToken?: string };
@@ -256,14 +266,14 @@ async function handleCredentialsCallback(
         : await defaultCredentialsAuthorize({ email, password }, env, options);
 
     if (!user) {
-        return jsonResponse({ error: 'Invalid email or password' }, 401);
+        return errorResponse('Invalid email or password', 401, { code: 'INVALID_CREDENTIALS' });
     }
 
     if (options.requireVerifiedEmail && !user.emailVerified) {
-        return jsonResponse({ error: 'Please verify your email before signing in' }, 401);
+        return errorResponse('Please verify your email before signing in', 401, { code: 'EMAIL_UNVERIFIED' });
     }
 
-    return jsonForOutcome(await signInOrChallenge(user, env, request, options, 'credentials'));
+    return jsonForOutcome(await signInOrChallenge(user, env, request, options, 'password'));
 }
 
 async function handleOAuthSignIn(
@@ -461,7 +471,12 @@ async function handleOAuthCallback(
                     try {
                         await User.delete(userId);
                     } catch (cleanupError) {
-                        console.error('Failed to roll back orphaned OAuth user:', cleanupError);
+                        console.error(
+                            JSON.stringify({
+                                event: 'auth_oauth_user_rollback_failed',
+                                error: redactErrorForLog(cleanupError),
+                            }),
+                        );
                     }
                     throw accountError;
                 }
@@ -485,7 +500,9 @@ async function handleOAuthCallback(
             await announce(env, options, 'user.verified', { userId, email: userEmail, at: emailVerifiedAt });
         }
     } catch (error) {
-        console.error(`OAuth callback failed for provider "${providerId}":`, error);
+        console.error(
+            JSON.stringify({ event: 'auth_oauth_callback_failed', providerId, error: redactErrorForLog(error) }),
+        );
         return oauthErrorRedirect(env, options, 'OAuthCallback', request);
     }
 
@@ -504,7 +521,7 @@ async function handleOAuthCallback(
         env,
         request,
         options,
-        'oauth',
+        `oauth:${providerId}`,
     );
     return redirectForOutcome(outcome, env, options, sanitizeCallbackPath(statePayload.callbackUrl), [clearState]);
 }
@@ -525,12 +542,15 @@ async function handleMagicLinkSend(
 
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     if (!email) {
-        return jsonResponse({ error: 'A valid email is required' }, 400);
+        return errorResponse('A valid email is required', 400, { code: 'VALIDATION_ERROR' });
     }
 
     const sender = resolveMagicLinkSender(env);
     if (!sender) {
-        return jsonResponse({ error: 'Magic link sign-in is not configured' }, 500);
+        return errorResponse('Magic link sign-in is not configured', 500, {
+            code: 'MAGIC_LINK_UNAVAILABLE',
+            exposure: 'public',
+        });
     }
 
     ensureOrmConnection(env);
@@ -558,8 +578,8 @@ async function handleMagicLinkSend(
     } catch (error) {
         // Don't leave a live token behind if the email never went out.
         await VerificationToken.deleteByIdentifierAndToken(identifier, tokenHash).catch(() => {});
-        console.error('Failed to send magic link email:', error);
-        return jsonResponse({ error: 'Failed to send magic link' }, 502);
+        console.error(JSON.stringify({ event: 'auth_magic_link_send_failed', error: redactErrorForLog(error) }));
+        return errorResponse('Failed to send magic link', 502, { code: 'MAGIC_LINK_SEND_FAILED', exposure: 'public' });
     }
 
     return jsonResponse({ success: true });
@@ -647,7 +667,7 @@ async function handleSignOut(request: Request, env: AuthEnv, options: CreateAuth
         try {
             await options.onSignOut?.(payload.sub);
         } catch (error) {
-            console.warn('onSignOut hook failed:', error);
+            console.warn(JSON.stringify({ event: 'auth_sign_out_hook_failed', error: redactErrorForLog(error) }));
         }
     }
 
@@ -663,7 +683,9 @@ async function handleSignOut(request: Request, env: AuthEnv, options: CreateAuth
 async function routeAuthRequest(request: Request, env: AuthEnv, options?: CreateAuthConfigOptions): Promise<Response> {
     try {
         if (!env.OBCF_D1) {
-            return jsonResponse({ error: 'OBCF_D1 database binding is required for authentication' }, 500);
+            return errorResponse('OBCF_D1 database binding is required for authentication', 500, {
+                code: 'CONFIG_ERROR',
+            });
         }
 
         const resolvedOptions = resolveOptions(env, options);
@@ -680,8 +702,10 @@ async function routeAuthRequest(request: Request, env: AuthEnv, options?: Create
             return await handleGetSession(request, env, resolvedOptions);
         }
 
-        // Passkeys, the second-factor challenge and the signed-in person's own factors.
-        const factorResponse = await handleFactorRequest(request, env, resolvedOptions, segments);
+        // Passkey sign-in and the second-factor challenge, then the signed-in person's own factors.
+        const factorResponse =
+            (await handleSignInFactorRequest(request, env, resolvedOptions, segments)) ??
+            (await handleFactorRequest(request, env, resolvedOptions, segments));
         if (factorResponse) return factorResponse;
 
         if (action === 'callback' && param === 'credentials' && request.method === 'POST') {
@@ -708,11 +732,11 @@ async function routeAuthRequest(request: Request, env: AuthEnv, options?: Create
             return await handleSignOut(request, env, resolvedOptions);
         }
 
-        return jsonResponse({ error: 'Not found' }, 404);
+        return errorResponse('Not found', 404, { code: 'NOT_FOUND' });
     } catch (error) {
         // Every handler above is awaited, so a rejection lands here rather than escaping the router.
         console.error(JSON.stringify({ event: 'auth_request_failed', error: redactErrorForLog(error) }));
-        return jsonResponse({ error: 'Authentication error' }, 500);
+        return errorResponse('Authentication error', 500, { code: 'AUTH_ERROR' });
     }
 }
 

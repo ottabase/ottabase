@@ -65,9 +65,29 @@ function rawToDer(raw: Uint8Array): Uint8Array {
     return concat(new Uint8Array([0x30, r.length + s.length]), r, s);
 }
 
+/** ES256, EdDSA (Ed25519), RS256: the COSE algorithms the relying party accepts. */
+export type SoftAlgorithm = -7 | -8 | -257;
+
+const KEY_PARAMS: Record<SoftAlgorithm, EcKeyGenParams | RsaHashedKeyGenParams | Algorithm> = {
+    [-7]: { name: 'ECDSA', namedCurve: 'P-256' },
+    [-8]: { name: 'Ed25519' },
+    [-257]: {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+    },
+};
+
+const SIGN_PARAMS: Record<SoftAlgorithm, AlgorithmIdentifier | EcdsaParams> = {
+    [-7]: { name: 'ECDSA', hash: 'SHA-256' },
+    [-8]: { name: 'Ed25519' },
+    [-257]: { name: 'RSASSA-PKCS1-v1_5' },
+};
+
 export interface SoftPasskey {
     credentialId: Uint8Array;
-    algorithm: -7 | -8;
+    algorithm: SoftAlgorithm;
     privateKey: CryptoKey;
     counter: number;
     userHandle: string;
@@ -81,13 +101,10 @@ export interface ClientContext {
 export async function createPasskey(
     ctx: ClientContext,
     challenge: string,
-    options: { algorithm?: -7 | -8; userHandle?: string; type?: string } = {},
+    options: { algorithm?: SoftAlgorithm; userHandle?: string; type?: string; userVerified?: boolean } = {},
 ): Promise<{ passkey: SoftPasskey; response: RegistrationResponseJSON }> {
     const algorithm = options.algorithm ?? -7;
-    const pair =
-        algorithm === -7
-            ? await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-            : ((await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair);
+    const pair = (await crypto.subtle.generateKey(KEY_PARAMS[algorithm], true, ['sign', 'verify'])) as CryptoKeyPair;
     const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
     const cose =
         algorithm === -7
@@ -98,16 +115,23 @@ export async function createPasskey(
                   [-2, fromB64url(jwk.x!)],
                   [-3, fromB64url(jwk.y!)],
               ])
-            : new Map<number, Cbor>([
-                  [1, 1],
-                  [3, -8],
-                  [-1, 6],
-                  [-2, fromB64url(jwk.x!)],
-              ]);
+            : algorithm === -257
+              ? new Map<number, Cbor>([
+                    [1, 3],
+                    [3, -257],
+                    [-1, fromB64url(jwk.n!)],
+                    [-2, fromB64url(jwk.e!)],
+                ])
+              : new Map<number, Cbor>([
+                    [1, 1],
+                    [3, -8],
+                    [-1, 6],
+                    [-2, fromB64url(jwk.x!)],
+                ]);
     const credentialId = crypto.getRandomValues(new Uint8Array(16));
     const authData = concat(
         await sha256(new TextEncoder().encode(ctx.rpId)),
-        new Uint8Array([0x45]), // UP | UV | AT
+        new Uint8Array([options.userVerified === false ? 0x41 : 0x45]), // UP | (UV) | AT
         new Uint8Array([0, 0, 0, 0]),
         new Uint8Array(16),
         new Uint8Array([0, credentialId.length]),
@@ -164,13 +188,7 @@ export async function signIn(
         JSON.stringify({ type: 'webauthn.get', challenge, origin: options.origin ?? ctx.origin }),
     );
     const signed = concat(authData, await sha256(clientData));
-    const raw = new Uint8Array(
-        await crypto.subtle.sign(
-            passkey.algorithm === -7 ? { name: 'ECDSA', hash: 'SHA-256' } : { name: 'Ed25519' },
-            passkey.privateKey,
-            signed,
-        ),
-    );
+    const raw = new Uint8Array(await crypto.subtle.sign(SIGN_PARAMS[passkey.algorithm], passkey.privateKey, signed));
     return {
         id: b64url(passkey.credentialId),
         rawId: b64url(passkey.credentialId),

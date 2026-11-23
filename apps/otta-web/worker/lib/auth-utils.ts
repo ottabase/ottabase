@@ -1,4 +1,9 @@
-import { type AuthEvents, CreateAuthConfigOptions, hashToken } from '@ottabase/auth/backend';
+import {
+    type AuthEvents,
+    bumpProfileVersion as bumpSessionProfileVersion,
+    CreateAuthConfigOptions,
+    hashToken,
+} from '@ottabase/auth/backend';
 import { userKey } from '@ottabase/cf';
 import { PLATFORM_ORG_SENTINEL } from '@ottabase/config';
 import { invalidateCache, invalidateCacheByPrefix } from '@ottabase/cf/kv-cache';
@@ -173,9 +178,9 @@ export function getAuthOptions(env: CloudflareEnv): CreateAuthConfigOptions {
     options.emit = (_env, name, payload) => emitAccountEvent<keyof AuthEvents>(env, name, payload);
 
     // Authenticator apps and passkeys carry the app's name; a package (an organization's two-factor
-    // policy) may require two-factor of a person from a date.
+    // policy) may require two-factor of a person from a date, in the organization they work in.
     options.appName = getOttabaseConfig(env).appName;
-    options.secondFactorRequiredFrom = (_env, userId) => packages.secondFactorRequiredFrom(env, userId);
+    options.secondFactorRequiredFrom = (_env, input) => packages.secondFactorRequiredFrom(env, input);
 
     return options;
 }
@@ -313,15 +318,14 @@ export async function invalidateMembershipCache(
  * of a session-reflected field (name/image/emailVerified/org/roles/permissions/membership) so live
  * sessions reflect the change instead of serving the stale snapshot until the cookie JWT expires.
  *
- * Best-effort: a KV failure only delays the refresh to the next natural bump. The version key's TTL
- * mirrors the session max-age so it always outlives the sessions it gates.
+ * Best-effort: a KV failure only delays the refresh to the next natural bump. The write itself is
+ * the package's (`bumpProfileVersion` in @ottabase/auth/backend, one key, TTL the session max-age);
+ * this wrapper adds the app's argument order, the missing-user no-op and the swallow.
  */
 export async function bumpProfileVersion(env: CloudflareEnv, userId: string | undefined | null): Promise<void> {
     if (!env.OBCF_KV || !userId) return;
     try {
-        await env.OBCF_KV.put(userKey('auth', userId, 'profile', 'version'), String(Date.now()), {
-            expirationTtl: Number(env.AUTH_SESSION_MAX_AGE) || 30 * 24 * 60 * 60,
-        });
+        await bumpSessionProfileVersion(userId, env as never);
     } catch (error) {
         console.warn(
             JSON.stringify({

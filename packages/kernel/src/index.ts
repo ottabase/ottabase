@@ -18,6 +18,7 @@ export { createPackageRegistry, type PackageRegistryOptions } from './registry';
 export type {
     Awaitable,
     AuthContribution,
+    SecondFactorPolicyInput,
     CronContribution,
     EnvContribution,
     EnvDeclaration,

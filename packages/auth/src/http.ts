@@ -4,6 +4,7 @@
 
 import { createD1Driver } from '@ottabase/db/drizzle-d1';
 import { registerConnection } from '@ottabase/ottaorm';
+import { errorResponse } from '@ottabase/utils/http-errors';
 import { jsonResponse as utilsJsonResponse } from '@ottabase/utils/http-response';
 import { parseCookies } from './cookies';
 import { verifyCsrfToken } from './csrf';
@@ -79,10 +80,9 @@ export async function requireCsrf(request: Request, env: AuthEnv, submittedToken
     if (!isTrustedOrigin(request, env)) {
         // Echoed for the developer; capped, since it is whatever the client sent.
         const origin = (request.headers.get('Origin') ?? '').slice(0, 200);
-        return jsonResponse(
-            { error: `Untrusted origin ${origin}: open the app at its configured URL (AUTH_URL)` },
-            403,
-        );
+        return errorResponse(`Untrusted origin ${origin}: open the app at its configured URL (AUTH_URL)`, 403, {
+            code: 'UNTRUSTED_ORIGIN',
+        });
     }
     const cookies = parseCookies(request.headers.get('Cookie'));
     const secret = resolveAuthSecret(env);
@@ -91,5 +91,5 @@ export async function requireCsrf(request: Request, env: AuthEnv, submittedToken
         typeof submittedToken === 'string' ? submittedToken : undefined,
         secret,
     );
-    return valid ? null : jsonResponse({ error: 'Invalid or missing CSRF token' }, 403);
+    return valid ? null : errorResponse('Invalid or missing CSRF token', 403, { code: 'CSRF_INVALID' });
 }
