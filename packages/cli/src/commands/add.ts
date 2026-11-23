@@ -645,7 +645,10 @@ export function planAdd(root: string, appName: string, pkg: PackageDescriptor): 
         const missing = {
             pages: (pkg.adminPages ?? []).filter((page) => !listed(page.path)),
             routes: (pkg.routes ?? []).filter((route) => !listed(route.path)),
-            notices: Object.entries(pkg.notices ?? {}).filter(([code]) => !scope.includes(`${quote(code)}: {`)),
+            // Prettier unquotes keys that are identifiers (`subscribed: {`), so either form counts.
+            notices: Object.entries(pkg.notices ?? {}).filter(
+                ([code]) => !new RegExp(`(['"]?)${escapeRegex(code)}\\1\\s*:\\s*\\{`).test(scope),
+            ),
         };
         const paths = [
             ...[...missing.pages, ...missing.routes].map((entry) => entry.path),

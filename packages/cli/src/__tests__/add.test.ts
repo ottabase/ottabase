@@ -750,6 +750,22 @@ describe('a later release that adds a notice', () => {
         );
         expect(plan().steps.find((s) => s.file === 'apps/bar/src/ottabase/config/packages.ts')!.action).toBe('skip');
     });
+
+    it('counts a notice whose key Prettier unquoted as present', () => {
+        const root = fixture();
+        const plan = () => planAdd(root, 'bar', readPackageDescriptor(root, 'pulse'));
+        applyAdd(root, plan());
+        const descriptor = path.join(root, 'packages/pulse/package.json');
+        const pkg = fs.readJsonSync(descriptor);
+        pkg.ottabase.notices.subscribed = { type: 'success', message: 'Subscribed.' };
+        fs.writeJsonSync(descriptor, pkg);
+        applyAdd(root, plan());
+        const client = path.join(root, 'apps/bar/src/ottabase/config/packages.ts');
+        const formatted = fs.readFileSync(client, 'utf8').replace("'subscribed': {", 'subscribed: {');
+        expect(formatted).toContain('            subscribed: {');
+        fs.writeFileSync(client, formatted);
+        expect(plan().steps.find((s) => s.file === 'apps/bar/src/ottabase/config/packages.ts')!.action).toBe('skip');
+    });
 });
 
 describe('wiredSomething', () => {
