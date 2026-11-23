@@ -232,6 +232,39 @@ that merely contain a keyword (`design`, `tokenizer`, `sessionStorage`) stay rea
 secret at all: `Unexpected token: <`, `password: Required`, `secrets: permission denied`. Every pattern is bounded and
 the input is read only a fixed distance past `maxLength`, so a hostile error costs a known amount of CPU.
 
+### Typed Endpoints (`@ottabase/utils/endpoint`)
+
+A custom route declared once, in a module the Worker and the browser both import. The path's `:params`, the input and
+the response are typed from that one value; no codegen.
+
+```typescript
+import { defineEndpoint, endpointHandler, returns } from '@ottabase/utils/endpoint';
+import { z } from 'zod';
+
+// ottabase/endpoints/sessions.ts: shared
+export const renameSession = defineEndpoint({
+    method: 'PATCH',
+    path: '/api/users/me/sessions/:id',
+    input: z.object({ name: z.string().trim().min(1).max(40) }), // anything with parse/safeParse
+    output: returns<{ session: SessionSummary }>(),
+});
+
+// The Worker: params.id and input.name are typed; returning anything but the output is a type error.
+router.patch(
+    renameSession.path,
+    endpointHandler(renameSession, async (c, { params, input }) => {
+        const session = await rename(params.id, input.name);
+        return session ? { session } : errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
+    }),
+);
+```
+
+`endpointHandler` reads the input (the query string for GET, the JSON body otherwise), answers 400 `VALIDATION_ERROR`
+with field errors when it does not parse (`INVALID_JSON` for a body that is not JSON), sends a returned value as JSON
+(`{ headers, status }` options) and passes a returned `Response` through. `endpointUrl(endpoint, params)` builds the URL
+(each param encoded; a missing one throws), `matchEndpointPath(path, pathname)` reads params back. The browser side is
+`useEndpointQuery` / `useEndpointMutation` in `@ottabase/ottaorm/client`.
+
 ### Environment Utilities (`@ottabase/utils/env`) - Server-side
 
 - **`isDev: boolean`** - Check if running in development environment

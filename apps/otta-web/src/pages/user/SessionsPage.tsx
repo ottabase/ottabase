@@ -4,8 +4,8 @@
  * Ids are opaque server HMACs; the server only ever touches the caller's own sessions.
  */
 import { useSession } from '@/lib/auth';
-import type { SessionSummary } from '@ottabase/auth/backend';
-import { useApiMutation, useApiQuery } from '@ottabase/ottaorm/client';
+import { useEndpointMutation, useEndpointQuery } from '@ottabase/ottaorm/client';
+import { listSessions, renameSession, revokeOtherSessions, revokeSession } from '../../../ottabase/endpoints/sessions';
 import {
     Badge,
     Button,
@@ -114,25 +114,18 @@ export function SessionsPage() {
     const { logout } = useSession();
     const [confirm, setConfirm] = useState<{ kind: 'signout' | 'revoke' | 'others'; id?: string } | null>(null);
 
-    const sessions = useApiQuery<{ sessions: SessionSummary[] }, SessionSummary[]>({
-        queryKey: SESSIONS_KEY,
-        endpoint: '/api/users/me/sessions',
-        select: (r) => r.sessions,
-    });
+    // Typed by the shared declarations in ottabase/endpoints/sessions.ts, which the Worker serves.
+    const sessions = useEndpointQuery(listSessions, {}, { queryKey: SESSIONS_KEY, select: (r) => r.sessions });
     const invalidate = () => queryClient.invalidateQueries({ queryKey: SESSIONS_KEY });
 
-    const rename = useApiMutation<{ session: SessionSummary }, { id: string; name: string }>({
-        endpoint: ({ id }) => `/api/users/me/sessions/${id}`,
-        method: 'PATCH',
+    const rename = useEndpointMutation(renameSession, {
         mutationOptions: {
             onSuccess: () => invalidate(),
             onError: (error) => toast.error(error.message || 'Could not rename the session'),
         },
     });
 
-    const revoke = useApiMutation<{ revoked?: boolean; signedOut?: boolean }, { id: string }>({
-        endpoint: ({ id }) => `/api/users/me/sessions/${id}`,
-        method: 'DELETE',
+    const revoke = useEndpointMutation(revokeSession, {
         mutationOptions: {
             onSuccess: (result) => {
                 if (result.signedOut) {
@@ -147,9 +140,7 @@ export function SessionsPage() {
         },
     });
 
-    const revokeOthers = useApiMutation<{ revoked: number }, Record<string, never>>({
-        endpoint: '/api/users/me/sessions/revoke-others',
-        method: 'POST',
+    const revokeOthers = useEndpointMutation(revokeOtherSessions, {
         mutationOptions: {
             onSuccess: ({ revoked }) => {
                 toast.success(
@@ -210,7 +201,9 @@ export function SessionsPage() {
                                     <InlineName
                                         value={session.name}
                                         placeholder={defaultName(index, list.length)}
-                                        onSave={(name) => rename.mutate({ id: session.id, name })}
+                                        onSave={(name) =>
+                                            rename.mutate({ params: { id: session.id }, input: { name } })
+                                        }
                                         disabled={rename.isPending}
                                     />
                                 </div>
@@ -302,7 +295,7 @@ export function SessionsPage() {
                     setConfirm(null);
                     if (!action) return;
                     if (action.kind === 'others') revokeOthers.mutate({});
-                    else if (action.id) revoke.mutate({ id: action.id });
+                    else if (action.id) revoke.mutate({ params: { id: action.id } });
                 }}
             />
         </div>

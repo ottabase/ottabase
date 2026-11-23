@@ -31,6 +31,8 @@ export {
 export {
     useApiQuery,
     useApiMutation,
+    useEndpointMutation,
+    useEndpointQuery,
     useBatchMutation,
     type ApiMutationOptions,
     type ApiQueryOptions,

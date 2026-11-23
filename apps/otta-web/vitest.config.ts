@@ -110,6 +110,7 @@ export default defineConfig({
             '@ottabase/ottarouter': path.resolve(__dirname, '../../packages/ottarouter/src/index.ts'),
             '@ottabase/auth/backend': path.resolve(__dirname, '../../packages/auth/src/backend-handler'),
             '@ottabase/utils/http-response': path.resolve(__dirname, '../../packages/utils/src/http-response'),
+            '@ottabase/utils/endpoint': path.resolve(__dirname, '../../packages/utils/src/endpoint'),
             '@ottabase/utils/http-errors': path.resolve(__dirname, '../../packages/utils/src/http-errors'),
             '@ottabase/utils/hmac-signature': path.resolve(__dirname, '../../packages/utils/src/hmac-signature'),
             '@ottabase/utils/outbound-url': path.resolve(__dirname, '../../packages/utils/src/outbound-url'),

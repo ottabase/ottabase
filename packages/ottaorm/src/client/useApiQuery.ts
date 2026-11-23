@@ -19,6 +19,7 @@ import {
     shouldRetryQuery,
     useApiClient,
 } from './QueryProvider';
+import { endpointUrl, type Endpoint, type EndpointCall, type EndpointOutput } from '@ottabase/utils/endpoint';
 import type { ApiClientError, ApiClientRequestOptions } from './types';
 
 export interface ApiQueryOptions<TData, TSelected = TData> {
@@ -78,6 +79,8 @@ export interface ApiMutationOptions<TData, TVariables, TContext = unknown> {
     invalidateKeys?: QueryKey[];
     /** Additional request options. Method and body remain framework-owned. */
     requestOptions?: Omit<ApiClientRequestOptions, 'method' | 'body'>;
+    /** The request body for these variables. Default: the variables themselves (none for DELETE). */
+    body?: (variables: TVariables) => unknown;
     mutationOptions?: Omit<
         UseMutationOptions<TData, ApiClientError, TVariables, TContext>,
         'mutationFn' | 'retry' | 'retryDelay'
@@ -98,6 +101,7 @@ export function useApiMutation<TData, TVariables = unknown, TContext = unknown>(
         invalidateEntities = [],
         invalidateKeys = [],
         requestOptions,
+        body,
         mutationOptions,
     } = options;
     const queryClient = useQueryClient();
@@ -112,7 +116,7 @@ export function useApiMutation<TData, TVariables = unknown, TContext = unknown>(
             return apiClient<TData>(url, {
                 ...requestOptions,
                 method,
-                body: method === 'DELETE' ? undefined : variables,
+                body: body ? body(variables) : method === 'DELETE' ? undefined : variables,
             });
         },
         onSuccess: async (data, variables, onMutateResult, mutationContext) => {
@@ -139,4 +143,54 @@ export function useBatchMutation<TData, TVariables extends unknown[], TContext =
     options: BatchMutationOptions<TData, TVariables, TContext>,
 ) {
     return useApiMutation<TData, TVariables, TContext>(options);
+}
+
+// ── Typed endpoints (@ottabase/utils/endpoint) ──
+
+/**
+ * Read a GET endpoint declared with `defineEndpoint`: the URL is built from the typed params, the
+ * input goes in the query string, and the data is typed by the declaration. Everything else is
+ * `useApiQuery` (cache scope, retries, cancellation).
+ */
+export function useEndpointQuery<E extends Endpoint<string, unknown, unknown>, TSelected = EndpointOutput<E>>(
+    endpoint: E,
+    call: EndpointCall<E>,
+    options: Omit<ApiQueryOptions<EndpointOutput<E>, TSelected>, 'endpoint'>,
+) {
+    if (endpoint.method !== 'GET') {
+        throw new Error(
+            `[useEndpointQuery] ${endpoint.method} ${endpoint.path} is not a GET endpoint; use useEndpointMutation`,
+        );
+    }
+    const input = (call as { input?: Record<string, string | number | boolean | null | undefined> }).input;
+    return useApiQuery<EndpointOutput<E>, TSelected>({
+        ...options,
+        endpoint: endpointUrl(endpoint, (call as { params?: Record<string, string> }).params),
+        requestOptions: input
+            ? { ...options.requestOptions, params: { ...options.requestOptions?.params, ...input } }
+            : options.requestOptions,
+    });
+}
+
+/**
+ * Write through an endpoint declared with `defineEndpoint`. The mutation's variables are the
+ * call (`{ params, input }`): the params fill the path, the input is the body, and the result is
+ * typed by the declaration. Everything else is `useApiMutation` (no retries, invalidation).
+ */
+export function useEndpointMutation<E extends Endpoint<string, unknown, unknown>, TContext = unknown>(
+    endpoint: E,
+    options: Omit<
+        ApiMutationOptions<EndpointOutput<E>, EndpointCall<E>, TContext>,
+        'endpoint' | 'method' | 'body'
+    > = {},
+) {
+    if (endpoint.method === 'GET') {
+        throw new Error(`[useEndpointMutation] ${endpoint.path} is a GET endpoint; use useEndpointQuery`);
+    }
+    return useApiMutation<EndpointOutput<E>, EndpointCall<E>, TContext>({
+        ...options,
+        method: endpoint.method,
+        endpoint: (call) => endpointUrl(endpoint, (call as { params?: Record<string, string> }).params),
+        body: (call) => (call as { input?: unknown }).input,
+    });
 }

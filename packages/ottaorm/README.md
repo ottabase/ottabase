@@ -1701,11 +1701,29 @@ const publishAll = useApiMutation({
 });
 ```
 
+#### `useEndpointQuery` / `useEndpointMutation`: typed endpoints
+
+For a route declared with `defineEndpoint` (`@ottabase/utils/endpoint`), the URL, the input and the data are typed by
+the same declaration the Worker serves. The variables of a mutation are the call: `{ params, input }`.
+
+```typescript
+import { useEndpointMutation, useEndpointQuery } from '@ottabase/ottaorm/client';
+import { listSessions, renameSession } from '../ottabase/endpoints/sessions';
+
+const sessions = useEndpointQuery(listSessions, {}, { queryKey: ['me', 'sessions'], select: (r) => r.sessions });
+const rename = useEndpointMutation(renameSession, { invalidateKeys: [['me', 'sessions']] });
+rename.mutate({ params: { id }, input: { name } }); // a typo in either is a type error
+```
+
+Both are `useApiQuery` / `useApiMutation` underneath: same cache scope, retries and invalidation. A GET endpoint takes
+`useEndpointQuery` (its input goes in the query string), any other method `useEndpointMutation`; the wrong one throws.
+
 #### Convention: always declare `entity`
 
 | Scenario                 | Correct hook                                  |
 | ------------------------ | --------------------------------------------- |
 | Standard CRUD on a model | `createModelHooks`                            |
+| Typed custom endpoint    | `useEndpointQuery` / `useEndpointMutation`    |
 | Custom GET endpoint      | `useApiQuery({ entity, queryKey, endpoint })` |
 | Custom query function    | `useEntityQuery(entity, queryFn, { subKey })` |
 | Custom mutation          | `useApiMutation({ invalidateEntities })`      |

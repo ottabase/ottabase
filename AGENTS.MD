@@ -121,6 +121,9 @@ Use this as the default decision tree when shipping new work.
 1. **CRUD-first via OttaORM**
     - If it is standard entity CRUD, use model + `createModelHooks()` + `/api/ottaorm/{entity}`.
     - Do not introduce custom CRUD endpoints unless there is a real non-CRUD need.
+    - A custom route is declared once with `defineEndpoint` (`@ottabase/utils/endpoint`) in `ottabase/endpoints/`,
+      served with `endpointHandler` and called with `useEndpointQuery` / `useEndpointMutation`, so both sides share its
+      path, input and response types (`ottabase/endpoints/sessions.ts` is the example).
     - Exception: Menu, MenuItem use `/api/brand/menus` (cache-invalidating CRUD), not OttaORM.
     - An admin data screen for a model is a `static admin` opt-in (CrudHub, `/admin/crudhub`), not a new page.
     - A redirect that should show a message carries a notice **code**, never text: `withNotice(url, code)` from

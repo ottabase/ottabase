@@ -29,12 +29,8 @@ import { requireAdminAccess } from '../lib/admin-guard';
 import { buildCorsHeaders, ctxOf, h, makeApiRouteContext, type ApiRouteContext } from '../lib/api-context';
 import { premium } from '../lib/premium';
 import { handleUnhandledRequestError } from '../lib/http-error-boundary';
-import {
-    handleMeSessionRename,
-    handleMeSessionRevoke,
-    handleMeSessionsList,
-    handleMeSessionsRevokeOthers,
-} from './me-sessions';
+import { meSessionRename, meSessionRevoke, meSessionsList, meSessionsRevokeOthers } from './me-sessions';
+import { listSessions, renameSession, revokeOtherSessions, revokeSession } from '../../ottabase/endpoints/sessions';
 import { handleAvatarRemove, handleAvatarUpload } from './me-avatar';
 import { getKillSwitchStatus } from '../lib/killswitch';
 import { handleAdminCronCreate, handleAdminCronList, handleCronTask } from './admin-cron';
@@ -188,10 +184,11 @@ apiRouter.on(['GET', 'PATCH'], '/api/users/me', h(handleUserProfile));
 apiRouter.put('/api/users/me/avatar', h(handleAvatarUpload));
 apiRouter.delete('/api/users/me/avatar', h(handleAvatarRemove));
 // The signed-in user's own sessions (see me-sessions.ts). Static before :id so revoke-others wins.
-apiRouter.get('/api/users/me/sessions', h(handleMeSessionsList));
-apiRouter.post('/api/users/me/sessions/revoke-others', h(handleMeSessionsRevokeOthers));
-apiRouter.patch('/api/users/me/sessions/:id', (c) => handleMeSessionRename(ctxOf(c), c.params.id));
-apiRouter.delete('/api/users/me/sessions/:id', (c) => handleMeSessionRevoke(ctxOf(c), c.params.id));
+// Typed endpoints (ottabase/endpoints/sessions.ts): the page calls the same declarations.
+apiRouter.get(listSessions.path, meSessionsList);
+apiRouter.post(revokeOtherSessions.path, meSessionsRevokeOthers);
+apiRouter.patch(renameSession.path, meSessionRename);
+apiRouter.delete(revokeSession.path, meSessionRevoke);
 
 // -------------------------------------------------------
 // Email

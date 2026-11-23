@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **Typed endpoints: one declaration for both sides of a custom route.** `@ottabase/utils/endpoint` gives
+  `defineEndpoint({ method, path, input, output: returns<T>() })`; the path's `:params`, the input (any `parse` /
+  `safeParse` parser, zod included) and the response are typed from that value, with no codegen. The Worker serves it
+  with `endpointHandler` (input parsed, 400 `VALIDATION_ERROR` with field errors otherwise, the result sent as JSON) and
+  the browser calls it with `useEndpointQuery` / `useEndpointMutation` from `@ottabase/ottaorm/client`. otta-web's
+  sessions routes are the first: `ottabase/endpoints/sessions.ts`, served by `me-sessions.ts`, used by the sessions
+  page. `useApiMutation` takes a `body` mapper.
 - **Four more rules in the root lint config, for what AGENTS.MD only said in prose.** `ottabase/no-node-only-imports`
   (`fs`, `child_process`, threads in edge or browser code), `ottabase/headless-root` (a package root that reaches
   `react-dom` or the UI kit, checked one import deep), `ottabase/sanitized-inner-html` (`dangerouslySetInnerHTML`

@@ -1,5 +1,7 @@
 /**
- * The signed-in user's own sessions (the /sessions page).
+ * The signed-in user's own sessions (the /sessions page). Each route is declared once in
+ * `ottabase/endpoints/sessions.ts` and served here with `endpointHandler`, so the page and the
+ * Worker share the paths, the input rules and the response types.
  *
  * - `GET    /api/users/me/sessions`                 list, newest first, `current` marked
  * - `PATCH  /api/users/me/sessions/:id { name }`    rename (1 to 40 chars)
@@ -16,90 +18,94 @@ import {
     readSessionIdentity,
     renameUserSession,
     revokeOtherUserSessions,
-    revokeSession,
+    revokeSession as revokeOwnSession,
     revokeUserSessionById,
     sessionPublicId,
 } from '@ottabase/auth/backend';
+import { endpointHandler } from '@ottabase/utils/endpoint';
 import { errorResponse, redactErrorForLog } from '@ottabase/utils/http-errors';
 import { jsonResponse } from '@ottabase/utils/http-response';
+import { listSessions, renameSession, revokeOtherSessions, revokeSession } from '../../ottabase/endpoints/sessions';
+import type { WorkerCtx } from '../lib/api-context';
 import { getAuthOptions } from '../lib/auth-utils';
-import { readJson } from '../lib/utils';
-import type { ApiRouteContext } from './router';
 
 const NO_STORE = { headers: { 'Cache-Control': 'private, no-store' } };
 const PUBLIC_ID = /^[A-Za-z0-9_-]{16,32}$/;
+const notFound = () => errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
 
-async function requireIdentity(context: ApiRouteContext) {
-    const { request, env } = context;
-    const session = await getSession(request, env as never, getAuthOptions(env));
-    const identity = await readSessionIdentity(request, env as never);
+async function requireIdentity(c: WorkerCtx) {
+    const session = await getSession(c.req, c.env as never, getAuthOptions(c.env));
+    const identity = await readSessionIdentity(c.req, c.env as never);
     if (!session?.user?.id || !identity || identity.userId !== session.user.id) {
         return errorResponse('Unauthorized', 401, { code: 'UNAUTHORIZED' });
     }
     return identity;
 }
 
-export async function handleMeSessionsList(context: ApiRouteContext): Promise<Response> {
-    const identity = await requireIdentity(context);
-    if (identity instanceof Response) return identity;
-    try {
-        const sessions = await listUserSessions(identity.userId, context.env as never, identity.jti);
-        return jsonResponse({ sessions }, 200, NO_STORE);
-    } catch (error) {
-        console.error(JSON.stringify({ event: 'me_sessions_list_failed', error: redactErrorForLog(error) }));
-        return errorResponse('Could not list sessions', 500, { code: 'SESSIONS_UNAVAILABLE' });
-    }
-}
+export const meSessionsList = endpointHandler(
+    listSessions,
+    async (c: WorkerCtx) => {
+        const identity = await requireIdentity(c);
+        if (identity instanceof Response) return identity;
+        try {
+            return { sessions: await listUserSessions(identity.userId, c.env as never, identity.jti) };
+        } catch (error) {
+            console.error(JSON.stringify({ event: 'me_sessions_list_failed', error: redactErrorForLog(error) }));
+            return errorResponse('Could not list sessions', 500, { code: 'SESSIONS_UNAVAILABLE' });
+        }
+    },
+    NO_STORE,
+);
 
-export async function handleMeSessionRename(context: ApiRouteContext, id: string): Promise<Response> {
-    const identity = await requireIdentity(context);
-    if (identity instanceof Response) return identity;
-    if (!PUBLIC_ID.test(id)) return errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
-    const body = await readJson<{ name?: unknown }>(context.request);
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    if (!name || name.length > 40) {
-        return errorResponse('Validation failed', 400, {
-            code: 'VALIDATION_ERROR',
-            fieldErrors: { name: ['Name must be 1 to 40 characters'] },
-        });
-    }
-    const renamed = await renameUserSession(identity.userId, id, name, context.env as never);
-    if (!renamed) return errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
-    return jsonResponse(
-        { session: { ...renamed, current: id === (await sessionPublicId(identity.jti, context.env as never)) } },
-        200,
-        NO_STORE,
-    );
-}
+export const meSessionRename = endpointHandler(
+    renameSession,
+    async (c: WorkerCtx, { params, input }) => {
+        const identity = await requireIdentity(c);
+        if (identity instanceof Response) return identity;
+        if (!PUBLIC_ID.test(params.id)) return notFound();
+        const renamed = await renameUserSession(identity.userId, params.id, input.name, c.env as never);
+        if (!renamed) return notFound();
+        return {
+            session: { ...renamed, current: params.id === (await sessionPublicId(identity.jti, c.env as never)) },
+        };
+    },
+    NO_STORE,
+);
 
-export async function handleMeSessionRevoke(context: ApiRouteContext, id: string): Promise<Response> {
-    const identity = await requireIdentity(context);
-    if (identity instanceof Response) return identity;
-    if (!PUBLIC_ID.test(id)) return errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
-    const { request, env } = context;
-    const options = getAuthOptions(env);
+export const meSessionRevoke = endpointHandler(
+    revokeSession,
+    async (c: WorkerCtx, { params }) => {
+        const identity = await requireIdentity(c);
+        if (identity instanceof Response) return identity;
+        if (!PUBLIC_ID.test(params.id)) return notFound();
+        const options = getAuthOptions(c.env);
 
-    // Revoking the current session is a sign-out: tombstone it and clear the cookie.
-    if (id === (await sessionPublicId(identity.jti, env as never))) {
-        await revokeSession(identity.userId, identity.jti, env as never, options);
-        return jsonResponse({ signedOut: true }, 200, {
-            headers: { ...NO_STORE.headers, 'Set-Cookie': buildClearSessionCookie(env as never, request) },
-        });
-    }
+        // Revoking the current session is a sign-out: tombstone it and clear the cookie.
+        if (params.id === (await sessionPublicId(identity.jti, c.env as never))) {
+            await revokeOwnSession(identity.userId, identity.jti, c.env as never, options);
+            return jsonResponse({ signedOut: true }, 200, {
+                headers: { ...NO_STORE.headers, 'Set-Cookie': buildClearSessionCookie(c.env as never, c.req) },
+            });
+        }
 
-    const revoked = await revokeUserSessionById(identity.userId, id, env as never, options);
-    if (!revoked) return errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
-    return jsonResponse({ revoked: true }, 200, NO_STORE);
-}
+        const revoked = await revokeUserSessionById(identity.userId, params.id, c.env as never, options);
+        return revoked ? { revoked: true } : notFound();
+    },
+    NO_STORE,
+);
 
-export async function handleMeSessionsRevokeOthers(context: ApiRouteContext): Promise<Response> {
-    const identity = await requireIdentity(context);
-    if (identity instanceof Response) return identity;
-    const count = await revokeOtherUserSessions(
-        identity.userId,
-        identity.jti,
-        context.env as never,
-        getAuthOptions(context.env),
-    );
-    return jsonResponse({ revoked: count }, 200, NO_STORE);
-}
+export const meSessionsRevokeOthers = endpointHandler(
+    revokeOtherSessions,
+    async (c: WorkerCtx) => {
+        const identity = await requireIdentity(c);
+        if (identity instanceof Response) return identity;
+        const revoked = await revokeOtherUserSessions(
+            identity.userId,
+            identity.jti,
+            c.env as never,
+            getAuthOptions(c.env),
+        );
+        return { revoked };
+    },
+    NO_STORE,
+);

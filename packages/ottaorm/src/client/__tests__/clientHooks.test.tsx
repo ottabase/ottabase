@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createModelHooks } from '../createModelHooks';
 import { OttaQueryProvider, useApiClient, type VisibilityScope } from '../QueryProvider';
 import type { ApiClientFunction } from '../types';
-import { useApiMutation, useApiQuery } from '../useApiQuery';
+import { defineEndpoint, returns } from '@ottabase/utils/endpoint';
+import { useApiMutation, useApiQuery, useEndpointMutation, useEndpointQuery } from '../useApiQuery';
 
 const scopeA: VisibilityScope = {
     appId: 'app',
@@ -289,5 +290,53 @@ describe('generic API hooks', () => {
             method: 'POST',
             body: { name: 'Ada' },
         });
+    });
+});
+
+describe('typed endpoints', () => {
+    const listTags = defineEndpoint({
+        method: 'GET',
+        path: '/api/posts/:postId/tags',
+        input: { parse: (value) => value as { q: string } },
+        output: returns<{ tags: string[] }>(),
+    });
+    const renameTag = defineEndpoint({
+        method: 'PATCH',
+        path: '/api/posts/:postId/tags/:tag',
+        input: { parse: (value) => value as { name: string } },
+        output: returns<{ ok: boolean }>(),
+    });
+
+    it('reads a GET endpoint with its params in the path and its input in the query', async () => {
+        const apiFn = vi.fn().mockResolvedValue({ tags: ['a'] });
+        const { result } = renderHook(
+            () => useEndpointQuery(listTags, { params: { postId: 'p 1' }, input: { q: 'x' } }, { queryKey: ['tags'] }),
+            { wrapper: createWrapper(asApiClient(apiFn)) },
+        );
+        await waitFor(() => expect(result.current.data).toEqual({ tags: ['a'] }));
+        expect(apiFn).toHaveBeenCalledWith(
+            '/api/posts/p%201/tags',
+            expect.objectContaining({ method: 'GET', params: { q: 'x' } }),
+        );
+    });
+
+    it('writes with the declared method, the params in the path and the input as the body', async () => {
+        const apiFn = vi.fn().mockResolvedValue({ ok: true });
+        const { result } = renderHook(() => useEndpointMutation(renameTag), {
+            wrapper: createWrapper(asApiClient(apiFn)),
+        });
+        await expect(
+            result.current.mutateAsync({ params: { postId: 'p1', tag: 'old' }, input: { name: 'new' } }),
+        ).resolves.toEqual({ ok: true });
+        expect(apiFn).toHaveBeenCalledWith(
+            '/api/posts/p1/tags/old',
+            expect.objectContaining({ method: 'PATCH', body: { name: 'new' } }),
+        );
+    });
+
+    it('refuses the wrong hook for the method', () => {
+        expect(() =>
+            renderHook(() => useEndpointMutation(listTags), { wrapper: createWrapper(asApiClient(vi.fn())) }),
+        ).toThrow('is a GET endpoint');
     });
 });
