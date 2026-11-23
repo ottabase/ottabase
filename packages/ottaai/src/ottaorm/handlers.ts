@@ -39,6 +39,11 @@ export interface CredentialHandlerOptions<HostContext = unknown> {
     contextFromRequest: (request: Request) => Promise<HostContext | null> | HostContext | null;
     /** Shared verification budget. Defaults to the package's in-memory limiter. */
     verifyLimiter?: VerifyLimiter;
+    /**
+     * "Test key" also proves the model answers in JSON. Set it when the app's tasks require
+     * `json`, so a model that cannot is caught on the form, not on every later call.
+     */
+    verifyJson?: boolean;
     /** Base path the handlers are mounted at, used only for building `next`/`self` links. */
     basePath?: string;
 }
@@ -406,6 +411,7 @@ export function createCredentialHandlers<HostContext>(
 
             const result = await verifyCredential(instance, auth.context, input, {
                 limiter: options.verifyLimiter,
+                json: options.verifyJson,
             });
             // ANSWER HTTP 200 FOR A CLASSIFIED RESULT and render from the `code` — a
             // validation failure is a RESULT, not a transport error. (Auth, scope and

@@ -272,6 +272,9 @@ const ai = createAiProvisioningWithStorage({
         // survives a request but not isolate churn — an attacker rotating connections gets a
         // fresh budget on each. Back it with KV in production.
         verifyLimiter: createKvVerifyLimiter(env.OBCF_KV),
+        // When your tasks require `json`: "Test key" asks for a small JSON object, so a model
+        // that cannot answer in JSON fails on the form (`INVALID_RESPONSE`), not on every call.
+        verifyJson: true,
     },
 });
 ```

@@ -1,15 +1,19 @@
 // ============================================================
 // @ottabase/ottaai — Verify a key + the shipped rate limiter
 // ============================================================
-// MECHANISM: a real but minimal inference call — 1 max token, temperature 0,
-// SKIP CACHE, ~15 s timeout (long enough for a cold provider, short enough that a
-// form does not hang), tagged as verification traffic so it is excludable from
-// cost analytics.
+// MECHANISM: a real but minimal inference call: 1 max token, SKIP CACHE, ~15 s
+// timeout (long enough for a cold provider, short enough that a form does not hang),
+// tagged as verification traffic so it is excludable from cost analytics. No
+// `temperature`: current reasoning models (Claude 5.x, OpenAI GPT-5 / o-series) reject a
+// non-default one with a 400, which read as a broken key. With `json: true` the call
+// asks for a tiny JSON object instead, so a model that cannot answer in JSON fails here
+// rather than on every later `json` task.
 //
 // VERIFICATION REUSES THE PRODUCTION MERGE PATH EXACTLY. A parallel test path is
 // the natural implementation and it drifts within a release.
 // ============================================================
 
+import { parseJsonObject } from '../content';
 import { decryptSecret } from '../crypto';
 import { AI_ERROR_CODES, AI_ERROR_MESSAGES, AiProvisioningError, type AiErrorCode } from '../errors';
 import { isDynamicModelRef, modelProviderMismatch } from '../model-ref';
@@ -20,6 +24,19 @@ import type { AiProvisioning } from './index';
 
 /** How long a verification call may take before it is abandoned. */
 export const VERIFY_TIMEOUT_MS = 15_000;
+
+/**
+ * Output budget of the JSON probe. The reply is ~10 tokens; the rest is room for a reasoning
+ * model's thinking, which shares the budget and would otherwise cut the reply off.
+ */
+export const VERIFY_JSON_MAX_TOKENS = 512;
+
+const VERIFY_JSON_SCHEMA: Record<string, unknown> = {
+    type: 'object',
+    properties: { ok: { type: 'boolean' } },
+    required: ['ok'],
+    additionalProperties: false,
+};
 
 export interface VerifyResult {
     /** `true` only when the provider actually accepted the credential. */
@@ -105,6 +122,11 @@ export interface VerifyOptions {
     limiter?: VerifyLimiter;
     /** Overrides the actor key used for rate limiting. Defaults to `${orgId}:${userId}`. */
     actorKey?: string;
+    /**
+     * Also prove the model answers in JSON (a `responseFormat` call), for a host whose tasks
+     * require `json`. Off by default: a key used only for text tasks must not fail on JSON.
+     */
+    json?: boolean;
 }
 
 /**
@@ -305,15 +327,34 @@ export async function verifyCredential(
 
     try {
         const client = instance.transport.createClient(merged);
-        const response = await client.complete({
-            messages: [{ role: 'user', content: 'ping' }],
-            maxTokens: 1,
-            temperature: 0,
-            skipCache: true,
-            timeout: VERIFY_TIMEOUT_MS,
-        });
+        const response = await client.complete(
+            options.json
+                ? {
+                      messages: [{ role: 'user', content: 'Reply with {"ok": true}.' }],
+                      responseFormat: { type: 'json', schema: VERIFY_JSON_SCHEMA, name: 'verify' },
+                      maxTokens: VERIFY_JSON_MAX_TOKENS,
+                      skipCache: true,
+                      timeout: VERIFY_TIMEOUT_MS,
+                  }
+                : {
+                      messages: [{ role: 'user', content: 'ping' }],
+                      maxTokens: 1,
+                      skipCache: true,
+                      timeout: VERIFY_TIMEOUT_MS,
+                  },
+        );
 
         if (response.ok) {
+            // The raw transport does not parse: same check the instrumented client applies.
+            if (options.json && !(response.result.json ?? parseJsonObject(response.result.text))) {
+                return {
+                    ok: false,
+                    code: AI_ERROR_CODES.INVALID_RESPONSE,
+                    message: 'The key works, but this model did not answer in JSON, which this app needs.',
+                    provider,
+                    model,
+                };
+            }
             return { ok: true, code: AI_ERROR_CODES.ERROR, message: 'Key verified.', provider, model };
         }
 

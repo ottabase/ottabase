@@ -510,6 +510,36 @@ describe('the key-test endpoint enforces the same admission rules as the write p
     });
 });
 
+describe('the key test works on reasoning models and can prove JSON', () => {
+    const KEY = { kind: 'inline', provider: 'openai', model: 'gpt-4o-mini', secret: 'sk-whatever-1234567890' } as const;
+
+    it('sends no temperature (Claude 5.x and GPT-5 reject a non-default one, failing a good key)', async () => {
+        const { ai, transport } = harness();
+        await verifyCredential(ai as never, ai.contextFrom(CONTEXT), KEY);
+        expect(transport.calls[0]!.options).not.toHaveProperty('temperature');
+        expect((transport.calls[0]!.options as { responseFormat?: unknown }).responseFormat).toBeUndefined();
+    });
+
+    it('with json, passes a model that answers in JSON', async () => {
+        const { ai, transport } = harness();
+        transport.script({ text: '{"ok": true}' });
+        const result = await verifyCredential(ai as never, ai.contextFrom(CONTEXT), KEY, { json: true });
+        expect(result.ok).toBe(true);
+        const options = transport.calls[0]!.options as { responseFormat?: { type: string }; maxTokens?: number };
+        expect(options.responseFormat?.type).toBe('json');
+        expect(options.maxTokens).toBeGreaterThan(1);
+    });
+
+    it('with json, fails a model whose reply is not JSON, as INVALID_RESPONSE rather than a bad key', async () => {
+        const { ai, transport } = harness();
+        transport.script({ text: 'Sure! Here you go: ok' });
+        const result = await verifyCredential(ai as never, ai.contextFrom(CONTEXT), KEY, { json: true });
+        expect(result.ok).toBe(false);
+        expect(result.code).toBe('INVALID_RESPONSE');
+        expect(result.message).toMatch(/JSON/);
+    });
+});
+
 describe('status picks the most informative task, not the first declared', () => {
     it('reports the tenant key even when a platform-only task is declared first', async () => {
         const { ai, store } = harness({

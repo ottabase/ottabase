@@ -819,6 +819,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`@ottabase/auth`: a failing sign-in handler escaped the router's catch.** `handleAuthRequest` returned each
   handler's promise from inside its `try` without awaiting it, so a thrown error (a database outage mid sign-in)
   rejected past the generic 500 and its redacted log. Every handler is awaited now.
+- **ottaai: "Test key" failed good keys on current models.** The test call sent `temperature: 0`, which Claude 5.x and
+  OpenAI's reasoning models (GPT-5, o-series) reject with a 400, so a working key read as failed. It sends no
+  temperature now. `handlers.verifyJson` (off by default) makes the test ask for a small JSON object, for an app whose
+  tasks require `json`: a model that cannot answer in JSON fails on the form as `INVALID_RESPONSE`, not on every later
+  call.
 - `pnpm install` works on pnpm 11 and later. They no longer read the `pnpm` field of package.json, so the list of
   dependencies allowed to run install scripts (esbuild, workerd, sharp, @swc/core, unrs-resolver) was ignored and the
   install stopped with `ERR_PNPM_IGNORED_BUILDS`. The list is `allowBuilds` in `pnpm-workspace.yaml` now, which pnpm
