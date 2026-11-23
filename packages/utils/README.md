@@ -15,8 +15,6 @@ pnpm add @ottabase/utils
 
 ```typescript
 import {
-    fileExists,
-    readFile,
     isEmail,
     changeCase,
     makeSlug,
@@ -27,12 +25,13 @@ import {
     parseCurrencyValue,
     parseNameAndEmail,
     parseJsonFromString,
-    getLastCommitMessage,
-    getCurrentBranch,
     isBrowser,
     isMobileBrowser,
 } from '@ottabase/utils';
 ```
+
+The root is edge-safe. The Node-only helpers (`node:fs`, `child_process`) are only at their subpaths,
+`@ottabase/utils/file` and `@ottabase/utils/git`, so a Worker or browser bundle never pulls them in.
 
 ### Tree-Shakeable Imports (Recommended)
 
@@ -245,25 +244,50 @@ import { z } from 'zod';
 export const renameSession = defineEndpoint({
     method: 'PATCH',
     path: '/api/users/me/sessions/:id',
-    input: z.object({ name: z.string().trim().min(1).max(40) }), // anything with parse/safeParse
+    input: z.object({ name: z.string().trim().min(1).max(40) }), // zod-like (parse/safeParse) or any Standard Schema
     output: returns<{ session: SessionSummary }>(),
 });
 
-// The Worker: params.id and input.name are typed; returning anything but the output is a type error.
+// The Worker: the guard runs first; params.id, input.name and auth are typed; returning anything
+// but the output is a type error.
 router.patch(
     renameSession.path,
-    endpointHandler(renameSession, async (c, { params, input }) => {
-        const session = await rename(params.id, input.name);
-        return session ? { session } : errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
-    }),
+    endpointHandler(
+        renameSession,
+        async (c, { params, input, auth }) => {
+            const session = await rename(auth.userId, params.id, input.name);
+            return session ? { session } : errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
+        },
+        { guard: requireIdentity, headers: { 'Cache-Control': 'private, no-store' } },
+    ),
 );
 ```
 
-`endpointHandler` reads the input (the query string for GET, the JSON body otherwise), answers 400 `VALIDATION_ERROR`
-with field errors when it does not parse (`INVALID_JSON` for a body that is not JSON), sends a returned value as JSON
-(`{ headers, status }` options) and passes a returned `Response` through. `endpointUrl(endpoint, params)` builds the URL
-(each param encoded; a missing one throws), `matchEndpointPath(path, pathname)` reads params back. The browser side is
-`useEndpointQuery` / `useEndpointMutation` in `@ottabase/ottaorm/client`.
+`endpointHandler(endpoint, handler, { guard?, headers?, status? })` works in this order:
+
+1. **`guard(c)`** runs before anything is read: a returned `Response` (a 401) goes out as is, so an anonymous caller
+   never learns which fields are invalid; a returned value reaches the handler as `call.auth`.
+2. **Path params** come from the router, else from the URL (one trailing slash ignored). No match, or a segment that is
+   not valid percent-encoding, is a 404.
+3. **The input**, only when the endpoint declares one (a body is never read otherwise): the query string for GET, where
+   a repeated key is a `string[]`, or the JSON body. 400 `INVALID_JSON` / `VALIDATION_ERROR` with field errors.
+4. **The result**: a value is sent as JSON with `status` (`204` sends no body); a returned `Response` passes through.
+   `headers` are added to either when the response lacks them.
+
+Types: the browser sends the parser's **input** type (zod `_input`, Standard Schema `types.input`: a field with a
+default may be left out) and the handler receives its **output** type. A GET input must be strings
+(`string | string[] | undefined` per field; zod's `z.coerce.number()` has a `number` input type, so take a string and
+convert it in the handler), and a path param is read up to the first character outside `[A-Za-z0-9_]` (`/files/:id.json`
+gives `{ id }`); `:id?` optional params are refused. A hand-written parser annotates its argument
+(`parse: (value: unknown) => ...`), or TypeScript cannot infer it.
+
+`output: returns<T>()` is a compile-time check only: whatever the handler returns is sent, extra fields included. To
+strip or validate the response at runtime, also declare `outputSchema` (a zod object strips unknown keys); a response
+that fails it is logged and answered 500 `INVALID_RESPONSE`.
+
+`endpointUrl(endpoint, params)` builds the URL (each param encoded; a missing one throws), `endpointQuery(input)` the
+query string, `matchEndpointPath(path, pathname)` reads params back. The browser side is `useEndpointQuery` /
+`useEndpointMutation` in `@ottabase/ottaorm/client`.
 
 ### Environment Utilities (`@ottabase/utils/env`) - Server-side
 

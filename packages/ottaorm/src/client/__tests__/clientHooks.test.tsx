@@ -3,12 +3,13 @@
 import { render, renderHook, waitFor } from '@testing-library/react';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { type ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createModelHooks } from '../createModelHooks';
 import { OttaQueryProvider, useApiClient, type VisibilityScope } from '../QueryProvider';
 import type { ApiClientFunction } from '../types';
-import { defineEndpoint, returns } from '@ottabase/utils/endpoint';
-import { useApiMutation, useApiQuery, useEndpointMutation, useEndpointQuery } from '../useApiQuery';
+import { defineEndpoint, returns, type EndpointCall, type EndpointInput } from '@ottabase/utils/endpoint';
+import { z } from 'zod';
+import { endpointQueryKey, useApiMutation, useApiQuery, useEndpointMutation, useEndpointQuery } from '../useApiQuery';
 
 const scopeA: VisibilityScope = {
     appId: 'app',
@@ -297,27 +298,72 @@ describe('typed endpoints', () => {
     const listTags = defineEndpoint({
         method: 'GET',
         path: '/api/posts/:postId/tags',
-        input: { parse: (value) => value as { q: string } },
+        input: { parse: (value: unknown) => value as { q: string; tag?: string[] } },
         output: returns<{ tags: string[] }>(),
     });
     const renameTag = defineEndpoint({
         method: 'PATCH',
         path: '/api/posts/:postId/tags/:tag',
-        input: { parse: (value) => value as { name: string } },
+        input: { parse: (value: unknown) => value as { name: string } },
         output: returns<{ ok: boolean }>(),
     });
+    const listAll = defineEndpoint({ method: 'GET', path: '/api/all', output: returns<{ ids: string[] }>() });
+    const revokeAll = defineEndpoint({
+        method: 'POST',
+        path: '/api/revoke-all',
+        output: returns<{ revoked: number }>(),
+    });
 
-    it('reads a GET endpoint with its params in the path and its input in the query', async () => {
+    it('reads a GET endpoint with its params in the path and its input in the query string', async () => {
         const apiFn = vi.fn().mockResolvedValue({ tags: ['a'] });
         const { result } = renderHook(
-            () => useEndpointQuery(listTags, { params: { postId: 'p 1' }, input: { q: 'x' } }, { queryKey: ['tags'] }),
+            () => useEndpointQuery(listTags, { params: { postId: 'p 1' }, input: { q: 'x', tag: ['a', 'b'] } }),
             { wrapper: createWrapper(asApiClient(apiFn)) },
         );
         await waitFor(() => expect(result.current.data).toEqual({ tags: ['a'] }));
         expect(apiFn).toHaveBeenCalledWith(
-            '/api/posts/p%201/tags',
-            expect.objectContaining({ method: 'GET', params: { q: 'x' } }),
+            '/api/posts/p%201/tags?q=x&tag=a&tag=b',
+            expect.objectContaining({ method: 'GET' }),
         );
+    });
+
+    it('keys each call by its params and input, so two calls are two cache entries', async () => {
+        const apiFn = vi.fn((url: string) => Promise.resolve({ tags: [url] }));
+        const { result } = renderHook(
+            () => ({
+                one: useEndpointQuery(listTags, { params: { postId: 'p1' }, input: { q: 'x' } }),
+                two: useEndpointQuery(listTags, { params: { postId: 'p2' }, input: { q: 'x' } }),
+                client: useQueryClient(),
+            }),
+            { wrapper: createWrapper(asApiClient(apiFn)) },
+        );
+        await waitFor(() => expect(result.current.two.data).toBeDefined());
+        expect(result.current.one.data).toEqual({ tags: ['/api/posts/p1/tags?q=x'] });
+        expect(result.current.two.data).toEqual({ tags: ['/api/posts/p2/tags?q=x'] });
+        expect(apiFn).toHaveBeenCalledTimes(2);
+        expect(
+            result.current.client.getQueryData(
+                endpointQueryKey(listTags, { params: { postId: 'p1' }, input: { q: 'x' } }),
+            ),
+        ).toEqual({ tags: ['/api/posts/p1/tags?q=x'] });
+        // The prefix alone matches every call of the endpoint, for invalidation.
+        expect(result.current.client.getQueriesData({ queryKey: endpointQueryKey(listTags) })).toHaveLength(2);
+    });
+
+    it('does not build the URL of a disabled query whose param is not known yet', () => {
+        const apiFn = vi.fn();
+        const postId: string | undefined = undefined;
+        const { result } = renderHook(
+            () =>
+                useEndpointQuery(
+                    listTags,
+                    { params: { postId: postId as unknown as string }, input: { q: 'x' } },
+                    { queryOptions: { enabled: false } },
+                ),
+            { wrapper: createWrapper(asApiClient(apiFn)) },
+        );
+        expect(result.current.fetchStatus).toBe('idle');
+        expect(apiFn).not.toHaveBeenCalled();
     });
 
     it('writes with the declared method, the params in the path and the input as the body', async () => {
@@ -334,9 +380,57 @@ describe('typed endpoints', () => {
         );
     });
 
-    it('refuses the wrong hook for the method', () => {
+    it('refuses the wrong hook for the method, at compile time and at runtime', () => {
         expect(() =>
+            // @ts-expect-error a GET endpoint is read with useEndpointQuery
             renderHook(() => useEndpointMutation(listTags), { wrapper: createWrapper(asApiClient(vi.fn())) }),
         ).toThrow('is a GET endpoint');
+        expect(() =>
+            renderHook(
+                // @ts-expect-error a PATCH endpoint is written with useEndpointMutation
+                () => useEndpointQuery(renameTag, { params: { postId: 'p', tag: 't' }, input: { name: 'n' } }),
+                { wrapper: createWrapper(asApiClient(vi.fn())) },
+            ),
+        ).toThrow('is not a GET endpoint');
+    });
+
+    it('types the call: zod input with defaults may be omitted by the caller, the page shapes compile', () => {
+        const search = defineEndpoint({
+            method: 'POST',
+            path: '/api/search/:scope',
+            input: z.object({ q: z.string(), limit: z.number().default(20) }),
+            output: returns<{ hits: string[] }>(),
+        });
+        // The caller sends the parser's INPUT type: `limit` has a default, so it is optional.
+        expectTypeOf<EndpointCall<typeof search>>().toEqualTypeOf<
+            { params: { scope: string } } & { input: { q: string; limit?: number | undefined } }
+        >();
+        // The handler receives its OUTPUT type.
+        expectTypeOf<EndpointInput<typeof search>>().toEqualTypeOf<{ q: string; limit: number }>();
+
+        // A zod GET input of strings (and string[] for a repeated key) is a query string...
+        const find = defineEndpoint({
+            method: 'GET',
+            path: '/api/find',
+            input: z.object({ q: z.string(), tag: z.array(z.string()).optional() }),
+            output: returns<{ hits: string[] }>(),
+        });
+        expectTypeOf<EndpointCall<typeof find>['input']>().toEqualTypeOf<{ q: string; tag?: string[] | undefined }>();
+        // ...a number is not: the wire carries strings (a coerced number's input type is number, so it is refused too).
+        // @ts-expect-error a GET input field must be string | string[] | undefined
+        defineEndpoint({ method: 'GET', path: '/x', input: z.object({ page: z.number() }), output: returns<1>() });
+
+        // The shapes the sessions page uses.
+        const useTypedShapes = () => {
+            const sessions = useEndpointQuery(listAll, {}, { queryKey: ['me', 'sessions'], select: (r) => r.ids });
+            expectTypeOf(sessions.data).toEqualTypeOf<string[] | undefined>();
+            const rename = useEndpointMutation(renameTag, { mutationOptions: { onSuccess: () => undefined } });
+            rename.mutate({ params: { postId: 'p', tag: 't' }, input: { name: 'n' } });
+            // @ts-expect-error the input is required
+            rename.mutate({ params: { postId: 'p', tag: 't' } });
+            useEndpointMutation(revokeAll).mutate({});
+            useEndpointMutation(search).mutate({ params: { scope: 'all' }, input: { q: 'x' } });
+        };
+        expect(useTypedShapes).toBeTypeOf('function');
     });
 });

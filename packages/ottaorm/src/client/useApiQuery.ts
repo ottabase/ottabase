@@ -19,14 +19,25 @@ import {
     shouldRetryQuery,
     useApiClient,
 } from './QueryProvider';
-import { endpointUrl, type Endpoint, type EndpointCall, type EndpointOutput } from '@ottabase/utils/endpoint';
+import {
+    endpointQuery,
+    endpointUrl,
+    type AnyEndpoint,
+    type Endpoint,
+    type EndpointCall,
+    type EndpointMethod,
+    type EndpointOutput,
+    type InputParser,
+    type QueryInput,
+} from '@ottabase/utils/endpoint';
 import type { ApiClientError, ApiClientRequestOptions } from './types';
 
 export interface ApiQueryOptions<TData, TSelected = TData> {
     /** Entity name used as an invalidation namespace. */
     entity?: string;
     queryKey: QueryKey;
-    endpoint: string;
+    /** The URL, or a function building it when the query runs (so a disabled query never builds it). */
+    endpoint: string | (() => string);
     /** Additional GET options. Method, body, and signal remain framework-owned. */
     requestOptions?: Omit<ApiClientRequestOptions, 'method' | 'body' | 'signal'>;
     /** Observer-local projection. Transformed data is never written into the shared cache. */
@@ -56,7 +67,7 @@ export function useApiQuery<TData, TSelected = TData>(options: ApiQueryOptions<T
         ...queryOptions,
         queryKey: resolvedKey,
         queryFn: async (context) =>
-            apiClient<TData>(endpoint, {
+            apiClient<TData>(typeof endpoint === 'function' ? endpoint() : endpoint, {
                 ...requestOptions,
                 method: 'GET',
                 signal: await getStableQuerySignal(context),
@@ -147,28 +158,60 @@ export function useBatchMutation<TData, TVariables extends unknown[], TContext =
 
 // ── Typed endpoints (@ottabase/utils/endpoint) ──
 
+/** An endpoint read with `useEndpointQuery`. */
+export type GetEndpoint = Endpoint<'GET', string, InputParser | undefined, unknown>;
+/** An endpoint written with `useEndpointMutation`. */
+export type MutationEndpoint = Endpoint<Exclude<EndpointMethod, 'GET'>, string, InputParser | undefined, unknown>;
+
+type LooseCall = { params?: Record<string, string>; input?: unknown };
+
+/**
+ * The cache key of an endpoint call: `[...prefix, params, input]`, where the prefix is the
+ * `queryKey` given to `useEndpointQuery` or else `[method, path]`. Without a call it is the
+ * prefix alone, which invalidates every call of the endpoint:
+ * `queryClient.invalidateQueries({ queryKey: endpointQueryKey(listTags) })`.
+ */
+export function endpointQueryKey<E extends AnyEndpoint>(
+    endpoint: E,
+    call?: EndpointCall<E>,
+    queryKey?: QueryKey,
+): QueryKey {
+    const prefix = queryKey ?? [endpoint.method, endpoint.path];
+    if (!call) return prefix;
+    const { params, input } = call as LooseCall;
+    return [...prefix, params ?? {}, input ?? {}];
+}
+
 /**
  * Read a GET endpoint declared with `defineEndpoint`: the URL is built from the typed params, the
- * input goes in the query string, and the data is typed by the declaration. Everything else is
- * `useApiQuery` (cache scope, retries, cancellation).
+ * input goes in the query string (a string[] repeats its key), and the data is typed by the
+ * declaration. Each distinct call (params and input) is its own cache entry; `queryKey`, when
+ * given, replaces the `[method, path]` prefix. The URL is built when the query runs, so a disabled
+ * query whose params are not known yet does not throw. Everything else is `useApiQuery` (cache
+ * scope, retries, cancellation).
  */
-export function useEndpointQuery<E extends Endpoint<string, unknown, unknown>, TSelected = EndpointOutput<E>>(
+export function useEndpointQuery<E extends GetEndpoint, TSelected = EndpointOutput<E>>(
     endpoint: E,
     call: EndpointCall<E>,
-    options: Omit<ApiQueryOptions<EndpointOutput<E>, TSelected>, 'endpoint'>,
+    options: Omit<ApiQueryOptions<EndpointOutput<E>, TSelected>, 'endpoint' | 'queryKey'> & {
+        queryKey?: QueryKey;
+    } = {},
 ) {
+    // Kept at runtime for untyped callers; the type parameter already refuses a non-GET endpoint.
     if (endpoint.method !== 'GET') {
         throw new Error(
             `[useEndpointQuery] ${endpoint.method} ${endpoint.path} is not a GET endpoint; use useEndpointMutation`,
         );
     }
-    const input = (call as { input?: Record<string, string | number | boolean | null | undefined> }).input;
+    const { params, input } = call as LooseCall;
     return useApiQuery<EndpointOutput<E>, TSelected>({
         ...options,
-        endpoint: endpointUrl(endpoint, (call as { params?: Record<string, string> }).params),
-        requestOptions: input
-            ? { ...options.requestOptions, params: { ...options.requestOptions?.params, ...input } }
-            : options.requestOptions,
+        queryKey: endpointQueryKey(endpoint, call, options.queryKey),
+        endpoint: () => {
+            const url = endpointUrl(endpoint, params);
+            const query = endpointQuery(input as QueryInput | undefined);
+            return query ? `${url}?${query}` : url;
+        },
     });
 }
 
@@ -177,20 +220,21 @@ export function useEndpointQuery<E extends Endpoint<string, unknown, unknown>, T
  * call (`{ params, input }`): the params fill the path, the input is the body, and the result is
  * typed by the declaration. Everything else is `useApiMutation` (no retries, invalidation).
  */
-export function useEndpointMutation<E extends Endpoint<string, unknown, unknown>, TContext = unknown>(
+export function useEndpointMutation<E extends MutationEndpoint, TContext = unknown>(
     endpoint: E,
     options: Omit<
         ApiMutationOptions<EndpointOutput<E>, EndpointCall<E>, TContext>,
         'endpoint' | 'method' | 'body'
     > = {},
 ) {
-    if (endpoint.method === 'GET') {
+    // Kept at runtime for untyped callers; the type parameter already refuses a GET endpoint.
+    if ((endpoint.method as EndpointMethod) === 'GET') {
         throw new Error(`[useEndpointMutation] ${endpoint.path} is a GET endpoint; use useEndpointQuery`);
     }
     return useApiMutation<EndpointOutput<E>, EndpointCall<E>, TContext>({
         ...options,
         method: endpoint.method,
-        endpoint: (call) => endpointUrl(endpoint, (call as { params?: Record<string, string> }).params),
-        body: (call) => (call as { input?: unknown }).input,
+        endpoint: (call) => endpointUrl(endpoint, (call as LooseCall).params),
+        body: (call) => (call as LooseCall).input,
     });
 }

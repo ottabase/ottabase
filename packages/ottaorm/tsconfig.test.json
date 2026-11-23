@@ -1,0 +1,7 @@
+{
+    // The client hooks plus their tests: the expectTypeOf assertions are compile-time checks.
+    "extends": "./tsconfig.json",
+    "compilerOptions": { "noEmit": true, "jsx": "react-jsx" },
+    "include": ["src/client/**/*"],
+    "exclude": ["dist", "node_modules"]
+}

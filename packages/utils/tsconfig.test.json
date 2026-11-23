@@ -1,0 +1,7 @@
+{
+    // The source plus its tests: the expectTypeOf assertions are compile-time checks, so they must be compiled.
+    "extends": "./tsconfig.json",
+    "compilerOptions": { "noEmit": true },
+    "include": ["src/**/*"],
+    "exclude": ["dist", "node_modules"]
+}

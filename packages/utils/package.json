@@ -122,7 +122,7 @@
         "dev": "tsup src/index.ts src/file.ts src/string.ts src/url.ts src/env.ts src/currency.ts src/email.ts src/email-gmail.ts src/json.ts src/git.ts src/browser.ts src/timezone.ts src/http-errors.ts src/http-response.ts src/endpoint.ts src/pagination.ts src/permissions.ts src/sanitize.ts src/outbound-url.ts src/hmac-signature.ts --format cjs,esm --dts --watch",
         "clean": "rimraf dist",
         "lint": "eslint src",
-        "type-check": "tsc --noEmit",
+        "type-check": "tsc -p tsconfig.test.json",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
         "verify:dist-sanitize": "node ./scripts/verify-sanitize-dist.mjs"

@@ -1707,16 +1707,24 @@ For a route declared with `defineEndpoint` (`@ottabase/utils/endpoint`), the URL
 the same declaration the Worker serves. The variables of a mutation are the call: `{ params, input }`.
 
 ```typescript
-import { useEndpointMutation, useEndpointQuery } from '@ottabase/ottaorm/client';
+import { endpointQueryKey, useEndpointMutation, useEndpointQuery } from '@ottabase/ottaorm/client';
 import { listSessions, renameSession } from '../ottabase/endpoints/sessions';
 
-const sessions = useEndpointQuery(listSessions, {}, { queryKey: ['me', 'sessions'], select: (r) => r.sessions });
-const rename = useEndpointMutation(renameSession, { invalidateKeys: [['me', 'sessions']] });
+const sessions = useEndpointQuery(listSessions, {}, { select: (r) => r.sessions });
+const rename = useEndpointMutation(renameSession, { invalidateKeys: [endpointQueryKey(listSessions)] });
 rename.mutate({ params: { id }, input: { name } }); // a typo in either is a type error
 ```
 
 Both are `useApiQuery` / `useApiMutation` underneath: same cache scope, retries and invalidation. A GET endpoint takes
-`useEndpointQuery` (its input goes in the query string), any other method `useEndpointMutation`; the wrong one throws.
+`useEndpointQuery` (its input goes in the query string, a `string[]` repeating its key), any other method
+`useEndpointMutation`; the wrong one is a type error (and throws at runtime for untyped callers).
+
+- **Cache key**: `[...prefix, params, input]`, so each distinct call is its own entry. The prefix is `queryKey` when you
+  pass one, else `[method, path]`. `endpointQueryKey(endpoint)` is the prefix alone (invalidates every call),
+  `endpointQueryKey(endpoint, call, queryKey?)` one call's key.
+- **Lazy URL**: the URL is built when the query runs, so `queryOptions: { enabled: false }` with a param not known yet
+  does not throw during render.
+- **Wire types**: `input` is the parser's input type, so a zod field with `.default()` may be left out by the caller.
 
 #### Convention: always declare `entity`
 
