@@ -54,8 +54,8 @@ function useAccountLinks(): AccountLink[][] {
     const demo = useDemoMode(); // otta:only demo
     const own: AccountLink[] = [
         { to: '/profile', label: 'Profile', icon: UserRound },
-        { to: '/sessions', label: 'Sessions', icon: MonitorSmartphone },
         { to: '/security', label: 'Security', icon: LockKeyhole },
+        { to: '/sessions', label: 'Sessions', icon: MonitorSmartphone },
         ...(MEDIA_LIBRARY_ENABLED ? [{ to: '/media-library', label: 'Media Library', icon: Images }] : []),
         ...PACKAGE_ACCOUNT_LINKS.map((link) => ({
             to: link.path,

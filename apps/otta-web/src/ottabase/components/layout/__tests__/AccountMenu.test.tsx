@@ -209,7 +209,7 @@ describe('AccountMenu', () => {
         const labels = within(screen.getByRole('menu'))
             .getAllByRole('link')
             .map((link) => link.textContent);
-        expect(labels).toEqual(['Profile', 'Sessions', 'Security', 'Media Library', 'Referrals', 'Billing']);
+        expect(labels).toEqual(['Profile', 'Security', 'Sessions', 'Media Library', 'Referrals', 'Billing']);
     });
 
     // otta:begin demo
@@ -245,7 +245,7 @@ describe('AccountMenu', () => {
             within(nav)
                 .getAllByRole('link')
                 .map((link) => link.getAttribute('href')),
-        ).toEqual(['/profile', '/sessions', '/security', '/media-library', '/referrals', '/billing', '/admin']);
+        ).toEqual(['/profile', '/security', '/sessions', '/media-library', '/referrals', '/billing', '/admin']);
         fireEvent.click(within(nav).getByRole('link', { name: 'Billing' }));
         expect(onNavigate).toHaveBeenCalledTimes(1);
 

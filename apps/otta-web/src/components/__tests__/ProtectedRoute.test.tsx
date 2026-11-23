@@ -22,7 +22,10 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/auth-redirect', () => ({ rememberReturnPath }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigate }));
+vi.mock('@tanstack/react-router', () => ({
+    useNavigate: () => navigate,
+    Navigate: ({ to }: { to: string }) => <span>navigate to {to}</span>,
+}));
 
 vi.mock('@ottabase/ui', () => ({
     Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -78,5 +81,37 @@ describe('ProtectedRoute', () => {
 
         expect(screen.getByText('Unable to verify your session')).toBeTruthy();
         expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it('never mounts a protected page while a two-factor policy confines the session', () => {
+        session.isInitialized = true;
+        session.user = { ...session.user, twoFactorSetupRequired: true } as typeof session.user;
+        const mounted = vi.fn();
+        function Page() {
+            mounted();
+            return <div>Admin content</div>;
+        }
+
+        render(
+            <ProtectedRoute requiredPermissions={['org:admin']}>
+                <Page />
+            </ProtectedRoute>,
+        );
+
+        expect(mounted).not.toHaveBeenCalled();
+        expect(screen.getByText('navigate to /security')).toBeTruthy();
+    });
+
+    it('renders /security itself while confined, where two-factor gets turned on', () => {
+        session.isInitialized = true;
+        session.user = { ...session.user, twoFactorSetupRequired: true } as typeof session.user;
+
+        render(
+            <ProtectedRoute allowWhileConfined>
+                <div>Security page</div>
+            </ProtectedRoute>,
+        );
+
+        expect(screen.getByText('Security page')).toBeTruthy();
     });
 });

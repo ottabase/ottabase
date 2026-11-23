@@ -168,7 +168,30 @@ function useAppSessionState(sessionData: SessionState): SessionState {
         };
     }, [setGlobalIsAuthenticated, setGlobalUser, setOrganizationId]);
 
+    // Code outside React (the API client) asks for a fresh session read; one at a time.
+    const { refreshSession } = sessionData;
+    useEffect(() => {
+        let inFlight = false;
+        const refresh = () => {
+            if (inFlight) return;
+            inFlight = true;
+            void refreshSession().finally(() => {
+                inFlight = false;
+            });
+        };
+        window.addEventListener(SESSION_REFRESH_EVENT, refresh);
+        return () => window.removeEventListener(SESSION_REFRESH_EVENT, refresh);
+    }, [refreshSession]);
+
     return sessionData;
+}
+
+/** Browser event that makes the mounted session root re-read the session from the server. */
+export const SESSION_REFRESH_EVENT = 'ottabase:session-refresh';
+
+/** Re-read the session from outside React, for example after a 401 that says the session changed. */
+export function requestSessionRefresh(): void {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_REFRESH_EVENT));
 }
 
 /** Read session state without causing network activity. */

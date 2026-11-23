@@ -3,7 +3,6 @@ import { DemoBanner } from '@/components/DemoBanner'; // otta:only demo
 import { NotFoundPage } from '@/components/NotFoundPage';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { RouteLoadingFallback } from '@/components/RouteLoadingFallback';
-import { TwoFactorSetupGate } from '@/components/TwoFactorSetupGate';
 import { UrlNotices } from '@/components/UrlNotices';
 import { usePageViewTracking } from '@/hooks/usePageViewTracking';
 import { ConfigurableLayout } from '@/ottabase/components/ConfigurableLayout';
@@ -42,7 +41,6 @@ function RootLayout() {
         <>
             <BrandPathSync pathname={pathname} />
             <UrlNotices />
-            <TwoFactorSetupGate pathname={pathname} />
             {/* otta:begin demo */}
             <DemoBanner />
             {/* otta:end demo */}
@@ -128,6 +126,7 @@ function protectedRoute<const TPath extends string>(
     path: TPath,
     loader: () => Promise<PageModule>,
     exportName: string,
+    options: { allowWhileConfined?: boolean } = {},
 ) {
     return new Route({
         getParentRoute: () => rootRoute,
@@ -137,7 +136,7 @@ function protectedRoute<const TPath extends string>(
                 const Comp = pageComponent(m, exportName);
                 return {
                     default: () => (
-                        <ProtectedRoute>
+                        <ProtectedRoute allowWhileConfined={options.allowWhileConfined}>
                             <Comp />
                         </ProtectedRoute>
                     ),
@@ -246,8 +245,16 @@ const layoutPreviewRoute = publicRoute('/layout-preview/$preset', () =>
 const loginRoute = publicRoute('/login', () =>
     import('@/pages/auth/LoginPage').then((m) => ({ default: m.LoginPage })),
 );
-const twoFactorRoute = publicRoute('/login/two-factor', () =>
-    import('@/pages/auth/TwoFactorPage').then((m) => ({ default: m.TwoFactorPage })),
+const twoFactorRoute = publicRoute(
+    '/login/two-factor',
+    () => import('@/pages/auth/TwoFactorPage').then((m) => ({ default: m.TwoFactorPage })),
+    {
+        // Where to go after, and the sign-in form's "Remember me" (absent after a link or OAuth sign-in).
+        validateSearch: (search: Record<string, unknown>): { callbackUrl?: string; remember?: boolean } => ({
+            callbackUrl: typeof search.callbackUrl === 'string' ? search.callbackUrl : undefined,
+            remember: search.remember === false || search.remember === 'false' ? false : undefined,
+        }),
+    },
 );
 const registerRoute = publicRoute('/register', () =>
     import('@/pages/auth/RegisterPage').then((m) => ({ default: m.RegisterPage })),
@@ -263,7 +270,10 @@ const resetPasswordRoute = publicRoute('/reset-password', () =>
 
 const userProfileRoute = protectedRoute('/profile', () => import('@/pages/user/UserProfilePage'), 'UserProfilePage');
 const userSessionsRoute = protectedRoute('/sessions', () => import('@/pages/user/SessionsPage'), 'SessionsPage');
-const userSecurityRoute = protectedRoute('/security', () => import('@/pages/user/SecurityPage'), 'SecurityPage');
+// /security stays open while a two-factor policy confines the session: it is where the person turns it on.
+const userSecurityRoute = protectedRoute('/security', () => import('@/pages/user/SecurityPage'), 'SecurityPage', {
+    allowWhileConfined: true,
+});
 const userMediaLibraryRoute = protectedRoute(
     '/media-library',
     () => import('@/pages/user/UserMediaLibraryPage'),

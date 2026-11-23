@@ -6,8 +6,9 @@
  */
 
 import { appIdAtom, globalStore, isAuthenticatedAtom, organizationIdAtom, userAtom } from '@/ottabase/state/appState';
-import { ApiError, createApiClient } from '@ottabase/api';
+import { ApiError, createApiClient, type ApiFunction, type ApiRequestOptions, type HttpMethod } from '@ottabase/api';
 import { AUTH_STORAGE_KEY, invalidateAuthSession } from '@ottabase/auth/react';
+import { requestSessionRefresh } from './auth';
 import { withNotice } from '@ottabase/utils/url';
 import { toast } from 'sonner';
 import { isReportable, reportProblem } from './report-problem';
@@ -124,7 +125,8 @@ export function reportApiError(error: unknown): void {
     if (error.isUnauthorized()) {
         const ended = error.response?.headers.get('X-Session-Ended');
         // Signed in, but a two-factor policy confines the session until it is on: not a sign-out.
-        // The session read says so too, and TwoFactorSetupGate keeps the person on /security.
+        // The client below already asked for a fresh session; with `twoFactorSetupRequired` on
+        // it, ProtectedRoute sends the person to /security.
         if (ended === 'two-factor-setup') return;
         handleUnauthorized(ended === 'revoked');
         return;
@@ -246,7 +248,7 @@ function handleUnauthorized(revoked = false): void {
  * }
  * ```
  */
-export const api = createApiClient({
+const transport = createApiClient({
     baseUrl: '',
     getAuthToken,
     defaultHeaders: () => {
@@ -270,6 +272,32 @@ export const api = createApiClient({
     },
     timeout: 30000,
 });
+
+/** Last time a confined 401 asked for a session read; a burst of failing requests asks once. */
+let confinedRefreshAt = 0;
+
+/**
+ * A 401 marked `X-Session-Ended: two-factor-setup` means the session is fine but a two-factor
+ * policy (for the active organization) now confines it. Re-read the session so its
+ * `twoFactorSetupRequired` flag routes the person to /security. Never a sign-out. Done here,
+ * not in `reportApiError`, so queries that present their own errors are covered too.
+ */
+function noticeConfinedSession(error: unknown): void {
+    if (!(error instanceof ApiError) || !error.isUnauthorized()) return;
+    if (error.response?.headers.get('X-Session-Ended') !== 'two-factor-setup') return;
+    if (Date.now() - confinedRefreshAt < 10_000) return;
+    confinedRefreshAt = Date.now();
+    requestSessionRefresh();
+}
+
+export const api = (async (endpoint: string, optionsOrMethod?: ApiRequestOptions | HttpMethod) => {
+    try {
+        return await transport(endpoint, optionsOrMethod as ApiRequestOptions);
+    } catch (error) {
+        noticeConfinedSession(error);
+        throw error;
+    }
+}) as ApiFunction;
 
 // Re-export types for convenience
 export { ApiError, getErrorMessage, getErrorMessages, isApiError } from '@ottabase/api';

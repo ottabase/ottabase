@@ -12,7 +12,8 @@ vi.mock('sonner', () => ({
 }));
 
 import { globalStore, isAuthenticatedAtom } from '@/ottabase/state/appState';
-import { reportApiError } from '../api';
+import { api, reportApiError } from '../api';
+import { SESSION_REFRESH_EVENT } from '../auth';
 
 describe('reportApiError', () => {
     beforeEach(() => {
@@ -76,6 +77,40 @@ describe('reportApiError', () => {
             expect(fake.href).toBe('/admin');
             expect(globalStore.get(isAuthenticatedAtom)).toBe(true);
         } finally {
+            Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+        }
+    });
+
+    it('re-reads the session once when requests meet a confined session, and never signs out', async () => {
+        const original = window.location;
+        const fake = { pathname: '/admin', href: '/admin' };
+        Object.defineProperty(window, 'location', { value: fake, writable: true, configurable: true });
+        const refreshes = vi.fn();
+        window.addEventListener(SESSION_REFRESH_EVENT, refreshes);
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(
+                async () =>
+                    new Response(JSON.stringify({ error: 'Unauthorized', code: 'UNAUTHORIZED' }), {
+                        status: 401,
+                        headers: { 'Content-Type': 'application/json', 'X-Session-Ended': 'two-factor-setup' },
+                    }),
+            ),
+        );
+        try {
+            globalStore.set(isAuthenticatedAtom, true);
+            // A burst of failing requests (one query presents its own error) asks for one session read.
+            const failures = await Promise.allSettled([api('/api/posts'), api('/api/tags'), api('/api/users')]);
+            expect(failures.every((outcome) => outcome.status === 'rejected')).toBe(true);
+            for (const outcome of failures) reportApiError((outcome as PromiseRejectedResult).reason);
+
+            expect(refreshes).toHaveBeenCalledTimes(1);
+            expect(fake.href).toBe('/admin');
+            expect(globalStore.get(isAuthenticatedAtom)).toBe(true);
+            expect(toastError).not.toHaveBeenCalled();
+        } finally {
+            window.removeEventListener(SESSION_REFRESH_EVENT, refreshes);
+            vi.unstubAllGlobals();
             Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
         }
     });

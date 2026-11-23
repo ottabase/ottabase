@@ -180,7 +180,7 @@ export async function signInWithCredentials(
         const data = await readJsonSafe(response);
 
         if (response.ok && data?.twoFactorRequired === true) {
-            return { success: false, twoFactorRequired: true, error: data.error };
+            return { success: false, twoFactorRequired: true };
         }
 
         if (!response.ok || !data?.success) {
@@ -528,6 +528,7 @@ export async function changePassword(
 export {
     addPasskey,
     confirmTotpSetup,
+    defaultPasskeyName,
     disableTotp,
     getFactors,
     getTwoFactorChallenge,
@@ -543,5 +544,6 @@ export {
     type FactorSignInResult,
     type FactorSummary,
     type PasskeySummary,
+    type TwoFactorMethods,
     type TwoFactorChallengeState,
 } from './client-factors';

@@ -1,73 +1,93 @@
 /**
- * /login/two-factor: the second step of a sign-in for an account with an authenticator app.
- * Password, magic-link and OAuth sign-ins land here with a short-lived pending cookie; a code, a
- * recovery code or a passkey finishes the sign-in and the person goes on to `callbackUrl`.
+ * /login/two-factor: the second step of a sign-in for an account with two-factor sign-in on.
+ * Password, magic-link and OAuth sign-ins land here with a short-lived pending cookie; a code
+ * from the authenticator app, a passkey or a recovery code finishes the sign-in and the person
+ * goes on to `callbackUrl`, with the sign-in form's "Remember me" choice (`remember`).
  */
+import { SixDigitCode } from '@/components/auth/SixDigitCode';
 import { useSession } from '@/lib/auth';
-import { getTwoFactorChallenge, isPasskeySupported, submitTwoFactor } from '@/lib/auth-api';
-import { safeAuthRedirect } from '@/lib/auth-redirect';
 import {
-    Alert,
-    AlertDescription,
-    Button,
-    Card,
-    CardContent,
-    Input,
-    InputOTP,
-    InputOTPGroup,
-    InputOTPSlot,
-    Spinner,
-} from '@ottabase/ui';
-import { Link, useNavigate } from '@tanstack/react-router';
+    getTwoFactorChallenge,
+    isPasskeySupported,
+    submitTwoFactor,
+    type TwoFactorChallengeState,
+} from '@/lib/auth-api';
+import { rememberReturnPath, safeAuthRedirect } from '@/lib/auth-redirect';
+import { Alert, AlertDescription, Button, Card, CardContent, Input, Spinner } from '@ottabase/ui';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { KeyRound, ShieldCheck } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-type Mode = 'code' | 'recovery';
+type Mode = 'code' | 'passkey' | 'recovery';
+type Methods = TwoFactorChallengeState['methods'];
+
+const ERROR_ID = 'two-factor-error';
 
 export function TwoFactorPage() {
     const navigate = useNavigate();
     const { login } = useSession();
-    const target = useRef(
-        safeAuthRedirect(
-            typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('callbackUrl'),
-        ),
-    );
-    const [state, setState] = useState<'loading' | 'pending' | 'expired'>('loading');
-    const [canUsePasskey, setCanUsePasskey] = useState(false);
-    const [hasRecoveryCodes, setHasRecoveryCodes] = useState(false);
+    const search = useSearch({ from: '/login/two-factor' });
+    const target = safeAuthRedirect(search.callbackUrl ?? null);
+    const [state, setState] = useState<'loading' | 'pending' | 'expired' | 'unreachable'>('loading');
+    const [methods, setMethods] = useState<Methods>({ totp: false, passkey: false, recoveryCode: false });
     const [mode, setMode] = useState<Mode>('code');
     const [code, setCode] = useState('');
     const [recoveryCode, setRecoveryCode] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const codeInput = useRef<HTMLInputElement>(null);
+    // The code field stays enabled while a code is checked (so focus stays put); this stops a second submit.
+    const submitting = useRef(false);
 
-    useEffect(() => {
-        let mounted = true;
-        void getTwoFactorChallenge().then((challenge) => {
-            if (!mounted) return;
-            setState(challenge.pending ? 'pending' : 'expired');
-            setCanUsePasskey(!!challenge.passkey && isPasskeySupported());
-            setHasRecoveryCodes(!!challenge.recoveryCodes);
-        });
-        return () => {
-            mounted = false;
-        };
+    const load = useCallback(async () => {
+        setState('loading');
+        setError(null);
+        const challenge = await getTwoFactorChallenge();
+        if (challenge.error) {
+            setError(challenge.error);
+            setState('unreachable');
+            return;
+        }
+        const usable = { ...challenge.methods, passkey: challenge.methods.passkey && isPasskeySupported() };
+        setMethods(usable);
+        setMode(usable.totp ? 'code' : usable.passkey ? 'passkey' : 'recovery');
+        setState(challenge.pending ? 'pending' : 'expired');
     }, []);
 
+    useEffect(() => {
+        void load();
+    }, [load]);
+
+    /** Back to the sign-in form, keeping where the person was going. */
+    const startOver = () => rememberReturnPath(target);
+
     const finish = async (proof: Parameters<typeof submitTwoFactor>[0]) => {
+        if (submitting.current) return;
+        submitting.current = true;
         setBusy(true);
         setError(null);
         const result = await submitTwoFactor(proof);
+        submitting.current = false;
         setBusy(false);
         if (result.success && result.session) {
-            login(result.session);
-            navigate({ to: target.current, replace: true });
+            login(result.session, { remember: search.remember });
+            navigate({ to: target, replace: true });
             return;
         }
         if (result.cancelled) return;
-        if (result.code === 'SECOND_FACTOR_EXPIRED') setState('expired');
+        if (result.code === 'SECOND_FACTOR_EXPIRED') {
+            // The page says it once, in the header and the card.
+            setState('expired');
+            return;
+        }
         setError(result.error ?? 'That did not work. Try again.');
         setCode('');
+        codeInput.current?.focus();
+    };
+
+    const switchTo = (next: Mode) => {
+        setMode(next);
+        setError(null);
     };
 
     if (state === 'loading') {
@@ -78,36 +98,49 @@ export function TwoFactorPage() {
         );
     }
 
+    const prompt =
+        state === 'expired'
+            ? 'This sign-in has expired. Sign in again to continue.'
+            : state === 'unreachable'
+              ? 'We could not check your sign-in.'
+              : mode === 'code'
+                ? 'Enter the six-digit code from your authenticator app.'
+                : mode === 'passkey'
+                  ? 'Use the passkey on this device to finish signing in.'
+                  : 'Enter one of the recovery codes you saved.';
+
+    const errorAlert = error && (
+        <Alert variant="destructive" id={ERROR_ID}>
+            <AlertDescription>{error}</AlertDescription>
+        </Alert>
+    );
+
     return (
         <div className="flex min-h-[80vh] items-center justify-center">
-            <div className="w-full max-w-sm space-y-6">
+            <div className="w-full max-w-md space-y-6">
                 <div className="flex flex-col items-center gap-3 text-center">
                     <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-background ring-1 ring-border">
-                        <ShieldCheck className="h-5 w-5" />
+                        <ShieldCheck className="h-5 w-5" aria-hidden="true" />
                     </span>
                     <div className="space-y-1.5">
                         <h1 className="text-2xl font-semibold tracking-[-0.015em]">Two-factor sign-in</h1>
-                        <p className="text-sm text-muted-foreground">
-                            {state === 'expired'
-                                ? 'This sign-in has expired.'
-                                : mode === 'code'
-                                  ? 'Enter the six-digit code from your authenticator app.'
-                                  : 'Enter one of the recovery codes you saved.'}
-                        </p>
+                        <p className="text-sm text-muted-foreground">{prompt}</p>
                     </div>
                 </div>
 
                 <Card>
                     <CardContent className="space-y-4 pt-6">
-                        {error && (
-                            <Alert variant="destructive">
-                                <AlertDescription>{error}</AlertDescription>
-                            </Alert>
-                        )}
+                        {errorAlert}
 
-                        {state === 'expired' ? (
+                        {state === 'unreachable' ? (
+                            <Button className="w-full" onClick={() => void load()}>
+                                Try again
+                            </Button>
+                        ) : state === 'expired' ? (
                             <Button asChild className="w-full">
-                                <Link to="/login">Sign in again</Link>
+                                <Link to="/login" onClick={startOver}>
+                                    Sign in again
+                                </Link>
                             </Button>
                         ) : mode === 'code' ? (
                             <form
@@ -118,55 +151,48 @@ export function TwoFactorPage() {
                                 }}
                             >
                                 <div className="flex justify-center">
-                                    <InputOTP
-                                        maxLength={6}
+                                    <SixDigitCode
                                         value={code}
                                         onChange={setCode}
-                                        onComplete={(value: string) => void finish({ code: value })}
-                                        disabled={busy}
+                                        onComplete={(value) => void finish({ code: value })}
+                                        inputRef={codeInput}
+                                        errorId={error ? ERROR_ID : undefined}
                                         autoFocus
-                                        inputMode="numeric"
-                                        autoComplete="one-time-code"
-                                        aria-label="Six-digit code"
-                                    >
-                                        <InputOTPGroup>
-                                            {[0, 1, 2, 3, 4, 5].map((index) => (
-                                                <InputOTPSlot key={index} index={index} />
-                                            ))}
-                                        </InputOTPGroup>
-                                    </InputOTP>
+                                    />
                                 </div>
                                 <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>
                                     {busy ? 'Checking...' : 'Verify'}
                                 </Button>
                             </form>
-                        ) : (
+                        ) : mode === 'recovery' ? (
                             <form
                                 className="space-y-4"
                                 onSubmit={(event) => {
                                     event.preventDefault();
-                                    if (recoveryCode.trim()) void finish({ recoveryCode });
+                                    if (recoveryCode.trim()) void finish({ recoveryCode: recoveryCode.trim() });
                                 }}
                             >
                                 <Input
                                     value={recoveryCode}
                                     onChange={(event) => setRecoveryCode(event.target.value)}
-                                    placeholder="xxxxx-xxxxx"
+                                    placeholder="xxxx-xxxx-xxxx-xxxx"
                                     autoFocus
                                     autoComplete="off"
                                     spellCheck={false}
                                     aria-label="Recovery code"
+                                    aria-describedby={error ? ERROR_ID : undefined}
+                                    aria-invalid={error ? true : undefined}
                                     className="font-mono"
                                 />
                                 <Button type="submit" className="w-full" disabled={busy || !recoveryCode.trim()}>
                                     {busy ? 'Checking...' : 'Use recovery code'}
                                 </Button>
                             </form>
-                        )}
+                        ) : null}
 
-                        {state === 'pending' && canUsePasskey && (
+                        {state === 'pending' && methods.passkey && mode !== 'recovery' && (
                             <Button
-                                variant="outline"
+                                variant={mode === 'passkey' ? 'default' : 'outline'}
                                 className="w-full"
                                 disabled={busy}
                                 onClick={() => void finish({ passkey: true })}
@@ -178,33 +204,31 @@ export function TwoFactorPage() {
                     </CardContent>
                 </Card>
 
-                {state === 'pending' && (
+                {state !== 'expired' && (
                     <div className="flex flex-col items-center gap-2 text-sm">
-                        {mode === 'code' && hasRecoveryCodes && (
+                        {state === 'pending' && mode !== 'recovery' && methods.recoveryCode && (
                             <button
                                 type="button"
                                 className="text-muted-foreground hover:text-foreground hover:underline"
-                                onClick={() => {
-                                    setMode('recovery');
-                                    setError(null);
-                                }}
+                                onClick={() => switchTo('recovery')}
                             >
-                                Lost your phone? Use a recovery code
+                                Use a recovery code
                             </button>
                         )}
-                        {mode === 'recovery' && (
+                        {state === 'pending' && mode === 'recovery' && (methods.totp || methods.passkey) && (
                             <button
                                 type="button"
                                 className="text-muted-foreground hover:text-foreground hover:underline"
-                                onClick={() => {
-                                    setMode('code');
-                                    setError(null);
-                                }}
+                                onClick={() => switchTo(methods.totp ? 'code' : 'passkey')}
                             >
-                                Use the authenticator app instead
+                                {methods.totp ? 'Use the authenticator app instead' : 'Use a passkey instead'}
                             </button>
                         )}
-                        <Link to="/login" className="text-muted-foreground hover:text-foreground hover:underline">
+                        <Link
+                            to="/login"
+                            onClick={startOver}
+                            className="text-muted-foreground hover:text-foreground hover:underline"
+                        >
                             Cancel and start over
                         </Link>
                     </div>

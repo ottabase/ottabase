@@ -22,6 +22,7 @@ export {
     submitTwoFactor,
     type FactorSummary,
     type PasskeySummary,
+    type TwoFactorChallengeState,
     changePassword,
     getCsrfToken,
     getSession,

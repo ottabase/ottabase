@@ -170,7 +170,22 @@ export function isEmailProviderConfigured(env: ProviderEnv): boolean {
  * />
  * ```
  */
-export function getLoginConfig(env: ProviderEnv) {
+export interface LoginConfig {
+    socialProviders: SocialProvider[];
+    showCredentials: boolean;
+    showMagicLink: boolean;
+    hasSocialProviders: boolean;
+    hasEmailProvider: boolean;
+    /**
+     * The app can do passkeys at its address (a domain over https, or localhost). Set by the
+     * `/api/auth/config` route, which knows the address; `getLoginConfig` alone leaves it unset.
+     */
+    passkeys?: boolean;
+    /** `AUTH_SECRET` is set. Set by the `/api/auth/config` route, for the dev warning. */
+    authSecretConfigured?: boolean;
+}
+
+export function getLoginConfig(env: ProviderEnv): LoginConfig {
     return {
         socialProviders: getConfiguredSocialProviders(env),
         showCredentials: isCredentialsConfigured(env),

@@ -4,7 +4,7 @@
 
 import { atom, useAtom, useAtomValue, type Getter } from 'jotai';
 import { atomWithStorage, RESET } from 'jotai/utils';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     signOut as authSignOut,
     getSession as getAuthSession,
@@ -12,6 +12,7 @@ import {
     type SessionFetchResult,
     type SessionUnavailable,
 } from './client-api';
+import { getFactors, type FactorResult, type FactorSummary } from './client-factors';
 
 /** User data returned with a session. */
 export interface User {
@@ -322,4 +323,49 @@ export function useSessionBootstrap(options?: SessionClientOptions): SessionStat
 
     const { initializeSession: _initializeSession, clearSession: _clearSession, ...session } = controller;
     return session;
+}
+
+/** The signed-in person's sign-in factors (`GET /api/auth/factors`), for a security page. */
+export interface FactorsState {
+    /** The last summary read; kept while a reload runs. */
+    data: FactorSummary | null;
+    /** Why the last read failed; null after a good one. */
+    error: string | null;
+    /** A read is in flight. */
+    pending: boolean;
+    /** Read again, after a change. Resolves with the read's result. */
+    reload: () => Promise<FactorResult<FactorSummary>>;
+}
+
+/** Read the person's two-factor and passkey state once on mount; `reload()` after each change. */
+export function useFactors(options?: SessionClientOptions): FactorsState {
+    const [data, setData] = useState<FactorSummary | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [pending, setPending] = useState(true);
+    const mounted = useRef(true);
+    const baseUrl = options?.baseUrl;
+
+    const reload = useCallback(async () => {
+        setPending(true);
+        const read = await getFactors({ baseUrl });
+        if (mounted.current) {
+            if (read.success) {
+                const { success: _success, ...summary } = read;
+                setData(summary);
+                setError(null);
+            } else setError(read.error);
+            setPending(false);
+        }
+        return read;
+    }, [baseUrl]);
+
+    useEffect(() => {
+        mounted.current = true;
+        void reload();
+        return () => {
+            mounted.current = false;
+        };
+    }, [reload]);
+
+    return { data, error, pending, reload };
 }

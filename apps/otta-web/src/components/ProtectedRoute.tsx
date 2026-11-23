@@ -2,7 +2,7 @@ import { isPlatformAdmin, useSession } from '@/lib/auth';
 import { rememberReturnPath } from '@/lib/auth-redirect';
 import { Button, Spinner } from '@ottabase/ui';
 import { hasGrantedPermission } from '@ottabase/utils/permissions';
-import { useNavigate } from '@tanstack/react-router';
+import { Navigate, useNavigate } from '@tanstack/react-router';
 import { type ReactNode, useEffect, useRef } from 'react';
 
 interface ProtectedRouteProps {
@@ -12,6 +12,11 @@ interface ProtectedRouteProps {
     requiredRoles?: string[];
     /** Require PLATFORM administrator (system-scoped). Gates the control-plane admin pages. */
     requirePlatformAdmin?: boolean;
+    /**
+     * Render even while a two-factor policy confines the session (`/security`, where the person
+     * turns it on). Every other protected page sends a confined session there instead.
+     */
+    allowWhileConfined?: boolean;
     fallback?: ReactNode;
 }
 
@@ -27,6 +32,7 @@ export function ProtectedRoute({
     requiredPermissions,
     requiredRoles,
     requirePlatformAdmin,
+    allowWhileConfined = false,
     fallback,
 }: ProtectedRouteProps) {
     const navigate = useNavigate();
@@ -69,6 +75,10 @@ export function ProtectedRoute({
     }
 
     if (!isAuthenticated) return null; // Redirect runs in the effect above.
+
+    // A two-factor policy confines this session until it is on: the server answers this page's
+    // requests with 401, so never mount it. Public pages and sign-in pages do not come through here.
+    if (user?.twoFactorSetupRequired === true && !allowWhileConfined) return <Navigate to="/security" replace />;
 
     const hasRequiredRoles =
         !requiredRoles || requiredRoles.length === 0 || requiredRoles.some((role) => user?.roles?.includes(role));

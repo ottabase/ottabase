@@ -16,29 +16,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   package's existing client entry, and new tables join its schema re-export line, where both used to be skipped.
   `otta strip` forgets the stripped packages' templates.
 - **Typed endpoints: one declaration for both sides of a custom route.** `@ottabase/utils/endpoint` gives
-  `defineEndpoint({ method, path, input, output: returns<T>() })`; the path's `:params`, the input (any `parse` /
-  `safeParse` parser, zod included) and the response are typed from that value, with no codegen. The Worker serves it
-  with `endpointHandler` (input parsed, 400 `VALIDATION_ERROR` with field errors otherwise, the result sent as JSON) and
-  the browser calls it with `useEndpointQuery` / `useEndpointMutation` from `@ottabase/ottaorm/client`. otta-web's
-  sessions routes are the first: `ottabase/endpoints/sessions.ts`, served by `me-sessions.ts`, used by the sessions
-  page. `useApiMutation` takes a `body` mapper.
+  `defineEndpoint({ method, path, input, output: returns<T>(), outputSchema? })`; the path's `:params`, the input (any
+  zod-like or Standard Schema parser: the browser sends its input type, the handler gets its output type) and the
+  response are typed from that value, with no codegen. The Worker serves it with
+  `endpointHandler(endpoint, handler, { guard })`: the guard (identity, say) runs before any body is read, then the path
+  match (404 otherwise), the input (400 `VALIDATION_ERROR` with field errors), the handler, and the optional
+  `outputSchema` strips what the type does not name. The browser calls it with `useEndpointQuery` (GET only, keyed on
+  params and input, URL built when the query runs) / `useEndpointMutation` (the rest) from `@ottabase/ottaorm/client`;
+  `endpointQueryKey` names the cache entry. otta-web's sessions routes are the first: `ottabase/endpoints/sessions.ts`,
+  served by `me-sessions.ts`.
 - **Four more rules in the root lint config, for what AGENTS.MD only said in prose.** `ottabase/no-node-only-imports`
-  (`fs`, `child_process`, threads in edge or browser code), `ottabase/headless-root` (a package root that reaches
-  `react-dom` or the UI kit, checked one import deep), `ottabase/sanitized-inner-html` (`dangerouslySetInnerHTML`
-  without a sanitizer) and `ottabase/no-raw-d1` (the D1 binding called from app server code). They cover Ottabase Pro
-  under `packages/pro` too. Sanctioned files carry their reason in the config; the audit log route is the one ratchet
-  entry; a test lints snippets to prove each rule fires.
+  (`fs`, `child_process`, threads in edge or browser code, followed one re-export deep), `ottabase/headless-root` (a
+  package root that reaches `react-dom` or the UI kit, checked one import deep), `ottabase/sanitized-inner-html`
+  (`dangerouslySetInnerHTML`, JSX spreads and `createElement` included, without one of the exported sanitizers) and
+  `ottabase/no-raw-d1` (any touch of a D1 binding in app server code beyond a presence check). Type-only imports pass.
+  They cover Ottabase Pro under `packages/pro` too, templates included. Sanctioned files carry their reason in the
+  config; a test lints snippets to prove each rule fires and each evasion fails. The root lint config is now a Turbo
+  input, so changing it re-runs every lint. `@ottabase/utils` no longer re-exports its Node-only `file` and `git`
+  modules from the root.
 - **Passkeys and two-factor sign-in, in `@ottabase/auth`.** Passkeys (WebAuthn: ES256, RS256 and Ed25519, user
   verification required, attestation `none`) sign in without a password or a code. An authenticator app (TOTP, RFC 6238)
-  adds a code after every password, magic-link and OAuth sign-in, with ten single-use recovery codes. Web Crypto only,
-  no new dependency in the package. One table, `authenticators` (core, denied to generic CRUD); TOTP secrets sealed with
-  a key derived from `AUTH_SECRET`; five wrong codes in fifteen minutes answer 429; changing a factor needs a sign-in
-  under fifteen minutes old. otta-web gets `/login/two-factor`, `/security` (QR code, recovery codes, passkeys) and a
-  passkey button on the login page; the `user.factor.changed` event goes on the bus. Passkeys need the app at a domain
-  or `localhost`, never an IP address.
-- **A package can require two-factor sign-in.** `auth.secondFactorRequiredFrom(env, userId)` on a kernel manifest
-  returns the time from which a person must have it on. Past that time their session reaches `/api/auth/*` only and the
-  app keeps them on `/security` until it is on.
+  or a passkey turns two-factor on: every password, magic-link and OAuth sign-in then asks for a code, a passkey or one
+  of ten single-use recovery codes (80 bits each, issued when two-factor turns on, gone with the last factor). Web
+  Crypto only, no new dependency in the package. One table, `authenticators` (core, denied to generic CRUD, one
+  authenticator app per person); TOTP secrets sealed under `AUTH_FACTOR_KEY` (else `AUTH_SECRET`; rotating it breaks
+  authenticator apps, which then answer `AUTHENTICATOR_UNREADABLE` and leave recovery codes and passkeys working).
+  Guesses are limited race-free in D1: five per pending sign-in, thirty an hour per account; a passkey is never blocked.
+  Changing a factor needs a sign-in under fifteen minutes old, measured from the session's `authAt`, which a password
+  change does not refresh. Every failure answers a stable `code`. otta-web gets `/login/two-factor`, and `/security`
+  (password, authenticator app, recovery codes, passkeys) with Profile and Sessions in one settings shell; the login
+  page gets a passkey button; the `user.factor.changed` event goes on the bus. Passkeys need the app at a domain or
+  `localhost`, never an IP address.
+- **A package can require two-factor sign-in.**
+  `auth.secondFactorRequiredFrom(env, { userId, organizationId, signInMethod })` on a kernel manifest returns the time
+  from which a person working in that organization must have it on. Past that time their session reaches `/api/auth/*`
+  and `/api/users/me` (to switch organization) only, and the app keeps them on `/security` until it is on.
+  `bumpOrganizationVersion` makes every member's session re-read the rule with one write.
 - **`@ottabase/ui` hooks and CopyButton.** `@ottabase/ui/hooks` (also in the barrel): `useClipboard`, `useClickOutside`,
   `useDebouncedValue`/`useDebouncedCallback`, `useLocalStorage` (JSON, synced across hooks and tabs) with
   `getStorageValue`/`setStorageValue`, `useHotkeys` with `parseShortcut`, `useMediaQuery`, `useReducedMotion`,

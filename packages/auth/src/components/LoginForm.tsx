@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { KeyRound } from 'lucide-react';
 import {
+    Button,
     Card,
     CardContent,
     CardDescription,
@@ -24,6 +26,11 @@ export interface LoginFormProps {
     socialProviders?: SocialProvider[];
     showCredentials?: boolean;
     showMagicLink?: boolean;
+    /**
+     * Offer "Sign in with a passkey" first in the card, above the "or" divider. Pass it once
+     * you know (the app can do passkeys and so can this browser), so the card does not shift.
+     */
+    showPasskey?: boolean;
 
     // Default tab
     defaultTab?: 'credentials' | 'magic-link';
@@ -33,6 +40,8 @@ export interface LoginFormProps {
     onCredentialsLogin?: (credentials: { email: string; password: string; rememberMe: boolean }) => Promise<void>;
     onMagicLinkSend?: (email: string) => Promise<void>;
     onForgotPassword?: () => void;
+    /** The passkey button; gets the same "Remember me" choice as the password form. */
+    onPasskeyLogin?: (options: { rememberMe: boolean }) => void;
 
     // State
     isLoading?: boolean;
@@ -46,6 +55,7 @@ export interface LoginFormProps {
     showRememberMe?: boolean;
     rememberMeLabel?: string;
     defaultRememberMe?: boolean;
+    passkeyLabel?: string;
     /**
      * A bot check (the `useTurnstile` widget) shared by the credentials and magic-link forms,
      * rendered above whichever submit button is showing. One widget covers both methods.
@@ -59,11 +69,13 @@ export function LoginForm({
     socialProviders = [],
     showCredentials = true,
     showMagicLink = false,
+    showPasskey = false,
     defaultTab = 'credentials',
     onSocialLogin,
     onCredentialsLogin,
     onMagicLinkSend,
     onForgotPassword,
+    onPasskeyLogin,
     isLoading = false,
     error,
     magicLinkSuccess = false,
@@ -73,12 +85,40 @@ export function LoginForm({
     showRememberMe = true,
     rememberMeLabel = 'Remember me',
     defaultRememberMe = true,
+    passkeyLabel = 'Sign in with a passkey',
     botCheck,
 }: LoginFormProps) {
     const [activeTab, setActiveTab] = useState(defaultTab);
+    // Held here, not in the password form, so the passkey button honours it too.
+    const [rememberMe, setRememberMe] = useState(defaultRememberMe);
 
-    const hasSocial = socialProviders.length > 0;
+    const hasSocial = socialProviders.length > 0 && !!onSocialLogin;
+    const hasPasskey = showPasskey && !!onPasskeyLogin;
+    const hasForms = showCredentials || showMagicLink;
     const hasMultipleMethods = [showCredentials, showMagicLink].filter(Boolean).length > 1;
+    const credentialsForm = showCredentials && onCredentialsLogin && (
+        <CredentialsForm
+            onSubmit={onCredentialsLogin}
+            isLoading={isLoading}
+            error={error}
+            showForgotPassword={!!onForgotPassword}
+            onForgotPassword={onForgotPassword}
+            showRememberMe={showRememberMe}
+            rememberMeLabel={rememberMeLabel}
+            rememberMe={rememberMe}
+            onRememberMeChange={setRememberMe}
+            botCheck={botCheck}
+        />
+    );
+    const magicLinkForm = showMagicLink && onMagicLinkSend && (
+        <MagicLinkForm
+            onSubmit={onMagicLinkSend}
+            isLoading={isLoading}
+            error={error}
+            success={magicLinkSuccess}
+            botCheck={botCheck}
+        />
+    );
 
     return (
         <Card className={`w-full max-w-md ${className}`}>
@@ -87,88 +127,50 @@ export function LoginForm({
                 {description && <CardDescription>{description}</CardDescription>}
             </CardHeader>
             <CardContent className="space-y-6">
+                {/* Passkey first: the quickest way in when the device has one */}
+                {hasPasskey && (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full"
+                        disabled={isLoading}
+                        onClick={() => onPasskeyLogin?.({ rememberMe })}
+                    >
+                        <KeyRound className="h-4 w-4" />
+                        {passkeyLabel}
+                    </Button>
+                )}
+
                 {/* Social providers */}
                 {hasSocial && onSocialLogin && (
-                    <>
-                        <SocialLoginButtons
-                            providers={socialProviders}
-                            onProviderClick={onSocialLogin}
-                            isLoading={isLoading}
-                        />
-                        {(showCredentials || showMagicLink) && <SocialLoginDivider text="or" />}
-                    </>
+                    <SocialLoginButtons
+                        providers={socialProviders}
+                        onProviderClick={onSocialLogin}
+                        isLoading={isLoading}
+                    />
                 )}
+                {(hasPasskey || hasSocial) && hasForms && <SocialLoginDivider text="or" />}
 
                 {/* Credentials and Magic Link */}
-                {(showCredentials || showMagicLink) && (
-                    <>
-                        {hasMultipleMethods ? (
-                            <Tabs
-                                value={activeTab}
-                                onValueChange={(v: string) => setActiveTab(v as 'credentials' | 'magic-link')}
-                            >
-                                <TabsList className="grid w-full grid-cols-2">
-                                    {showCredentials && <TabsTrigger value="credentials">Email & Password</TabsTrigger>}
-                                    {showMagicLink && <TabsTrigger value="magic-link">Magic Link</TabsTrigger>}
-                                </TabsList>
-
-                                {showCredentials && onCredentialsLogin && (
-                                    <TabsContent value="credentials">
-                                        <CredentialsForm
-                                            onSubmit={onCredentialsLogin}
-                                            isLoading={isLoading}
-                                            error={error}
-                                            showForgotPassword={!!onForgotPassword}
-                                            onForgotPassword={onForgotPassword}
-                                            showRememberMe={showRememberMe}
-                                            rememberMeLabel={rememberMeLabel}
-                                            defaultRememberMe={defaultRememberMe}
-                                            botCheck={botCheck}
-                                        />
-                                    </TabsContent>
-                                )}
-
-                                {showMagicLink && onMagicLinkSend && (
-                                    <TabsContent value="magic-link">
-                                        <MagicLinkForm
-                                            onSubmit={onMagicLinkSend}
-                                            isLoading={isLoading}
-                                            error={error}
-                                            success={magicLinkSuccess}
-                                            botCheck={botCheck}
-                                        />
-                                    </TabsContent>
-                                )}
-                            </Tabs>
-                        ) : (
-                            <>
-                                {showCredentials && onCredentialsLogin && (
-                                    <CredentialsForm
-                                        onSubmit={onCredentialsLogin}
-                                        isLoading={isLoading}
-                                        error={error}
-                                        showForgotPassword={!!onForgotPassword}
-                                        onForgotPassword={onForgotPassword}
-                                        showRememberMe={showRememberMe}
-                                        rememberMeLabel={rememberMeLabel}
-                                        defaultRememberMe={defaultRememberMe}
-                                        botCheck={botCheck}
-                                    />
-                                )}
-
-                                {showMagicLink && onMagicLinkSend && (
-                                    <MagicLinkForm
-                                        onSubmit={onMagicLinkSend}
-                                        isLoading={isLoading}
-                                        error={error}
-                                        success={magicLinkSuccess}
-                                        botCheck={botCheck}
-                                    />
-                                )}
-                            </>
-                        )}
-                    </>
-                )}
+                {hasForms &&
+                    (hasMultipleMethods ? (
+                        <Tabs
+                            value={activeTab}
+                            onValueChange={(v: string) => setActiveTab(v as 'credentials' | 'magic-link')}
+                        >
+                            <TabsList className="grid w-full grid-cols-2">
+                                {showCredentials && <TabsTrigger value="credentials">Email & Password</TabsTrigger>}
+                                {showMagicLink && <TabsTrigger value="magic-link">Magic Link</TabsTrigger>}
+                            </TabsList>
+                            {credentialsForm && <TabsContent value="credentials">{credentialsForm}</TabsContent>}
+                            {magicLinkForm && <TabsContent value="magic-link">{magicLinkForm}</TabsContent>}
+                        </Tabs>
+                    ) : (
+                        <>
+                            {credentialsForm}
+                            {magicLinkForm}
+                        </>
+                    ))}
 
                 {/* Sign up link */}
                 {showSignUp && onSignUpClick && (

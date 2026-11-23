@@ -9,8 +9,9 @@ import {
     signInWithPasskey,
     signInWithProvider,
 } from '@/lib/auth-api';
+import { api } from '@/lib/api';
 import { rememberReturnPath, resolveAuthRedirect } from '@/lib/auth-redirect';
-import { getLoginConfig } from '@ottabase/auth/config';
+import { getLoginConfig, type LoginConfig } from '@ottabase/auth/config';
 import { LoginForm } from '@ottabase/auth/components';
 import {
     Button,
@@ -27,10 +28,11 @@ import {
     DialogTitle,
     Input,
     Label,
+    Skeleton,
 } from '@ottabase/ui';
 import { useTurnstile } from '@ottabase/ui/turnstile';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { TURNSTILE_ACTIONS } from '../../../ottabase/turnstile';
 
@@ -51,15 +53,9 @@ export function LoginPage() {
     const human = useTurnstile(TURNSTILE_ACTIONS.signin);
     const resetHuman = useTurnstile(TURNSTILE_ACTIONS.passwordReset);
 
-    // Auto-detect configured providers from env
-    // This will check process.env for OAuth provider credentials
-    const [loginConfig, setLoginConfig] = useState(
-        () =>
-            ({
-                ...getLoginConfig({} as any),
-                authSecretConfigured: false,
-            }) as ReturnType<typeof getLoginConfig> & { authSecretConfigured: boolean; passkeys?: boolean },
-    );
+    // What this deployment offers (providers, magic link, passkeys), from the Worker's env. The
+    // form renders once it is known, so nothing in the card shifts when it arrives.
+    const [loginConfig, setLoginConfig] = useState<LoginConfig | null>(null);
     // Redirects arrive as `?notice=<code>` (email-verified, password-changed, auth.* failures).
     // The page claims the inline codes: successes render as a banner, failures as the form error.
     const notice = useNotice();
@@ -72,17 +68,14 @@ export function LoginPage() {
         let mounted = true;
 
         const loadConfig = async () => {
+            let config: LoginConfig;
             try {
-                const response = await fetch('/api/auth/config');
-                if (!response.ok) return;
-                const config = (await response.json()) as ReturnType<typeof getLoginConfig> & {
-                    authSecretConfigured: boolean;
-                    passkeys?: boolean;
-                };
-                if (mounted) setLoginConfig(config);
+                config = await api<LoginConfig>('/api/auth/config');
             } catch {
-                // ignore
+                // Unknown: offer what needs no configuration (email and password).
+                config = getLoginConfig({} as Parameters<typeof getLoginConfig>[0]);
             }
+            if (mounted) setLoginConfig(config);
         };
 
         loadConfig();
@@ -101,7 +94,7 @@ export function LoginPage() {
 
     // Check for missing configuration and show warnings (dev only)
     useEffect(() => {
-        if (!import.meta.env.DEV) return;
+        if (!import.meta.env.DEV || !loginConfig) return;
         const newWarnings: string[] = [];
 
         // Check for AUTH_SECRET
@@ -178,9 +171,12 @@ export function LoginPage() {
             );
 
             if (result.twoFactorRequired) {
-                // Right password, and the account has an authenticator app: the code comes next.
+                // Right password, and the account has two-factor sign-in on: the second step comes next.
                 hasNavigated.current = true;
-                navigate({ to: '/login/two-factor', search: { callbackUrl: redirectTarget.current } as never });
+                navigate({
+                    to: '/login/two-factor',
+                    search: { callbackUrl: redirectTarget.current, remember: rememberMe ? undefined : false },
+                });
                 return;
             }
 
@@ -203,17 +199,18 @@ export function LoginPage() {
         }
     };
 
-    const handlePasskeyLogin = async () => {
+    const handlePasskeyLogin = async ({ rememberMe }: { rememberMe: boolean }) => {
         setIsLoading(true);
         setError(undefined);
         const result = await signInWithPasskey();
         setIsLoading(false);
         if (result.success && result.session) {
-            login(result.session);
+            login(result.session, { remember: rememberMe });
             hasNavigated.current = true;
             navigate({ to: redirectTarget.current, replace: true });
         } else if (!result.cancelled) {
-            setError(result.error || 'That passkey could not sign you in.');
+            // A closed passkey sheet shows nothing; anything else says what happened.
+            setError(result.error || 'Your passkey did not work. Try again or use another way to sign in.');
         }
     };
 
@@ -302,43 +299,41 @@ export function LoginPage() {
                     </div>
                 )}
 
-                {/* Login Form */}
-                <LoginForm
-                    socialProviders={loginConfig.socialProviders}
-                    showCredentials={loginConfig.showCredentials}
-                    showMagicLink={loginConfig.showMagicLink}
-                    onSocialLogin={handleSocialLogin}
-                    onCredentialsLogin={handleCredentialsLogin}
-                    onMagicLinkSend={handleMagicLinkSend}
-                    onForgotPassword={() => {
-                        setForgotEmail('');
-                        setForgotStatus('idle');
-                        setForgotError(null);
-                        setForgotOpen(true);
-                    }}
-                    isLoading={isLoading}
-                    error={error}
-                    magicLinkSuccess={magicLinkSent}
-                    botCheck={human.widget}
-                    title="Sign in to your account"
-                    description="Choose your preferred login method"
-                    showSignUp
-                    onSignUpClick={() => {
-                        rememberReturnPath(redirectTarget.current);
-                        navigate({ to: '/register' });
-                    }}
-                />
-
-                {loginConfig.passkeys && isPasskeySupported() && (
-                    <Button
-                        variant="outline"
-                        className="w-full"
-                        disabled={isLoading}
-                        onClick={() => void handlePasskeyLogin()}
-                    >
-                        <KeyRound className="h-4 w-4" />
-                        Sign in with a passkey
-                    </Button>
+                {/* Login Form: rendered once the config is known, so the passkey button never pops in */}
+                {!loginConfig ? (
+                    <Skeleton
+                        className="h-96 w-full rounded-xl"
+                        aria-busy="true"
+                        aria-label="Loading sign-in options"
+                    />
+                ) : (
+                    <LoginForm
+                        socialProviders={loginConfig.socialProviders}
+                        showCredentials={loginConfig.showCredentials}
+                        showMagicLink={loginConfig.showMagicLink}
+                        showPasskey={loginConfig.passkeys === true && isPasskeySupported()}
+                        onPasskeyLogin={(options) => void handlePasskeyLogin(options)}
+                        onSocialLogin={handleSocialLogin}
+                        onCredentialsLogin={handleCredentialsLogin}
+                        onMagicLinkSend={handleMagicLinkSend}
+                        onForgotPassword={() => {
+                            setForgotEmail('');
+                            setForgotStatus('idle');
+                            setForgotError(null);
+                            setForgotOpen(true);
+                        }}
+                        isLoading={isLoading}
+                        error={error}
+                        magicLinkSuccess={magicLinkSent}
+                        botCheck={human.widget}
+                        title="Sign in to your account"
+                        description="Choose your preferred login method"
+                        showSignUp
+                        onSignUpClick={() => {
+                            rememberReturnPath(redirectTarget.current);
+                            navigate({ to: '/register' });
+                        }}
+                    />
                 )}
 
                 {/* Sign Up Link */}

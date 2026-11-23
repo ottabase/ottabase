@@ -10,7 +10,8 @@ import { api } from '@/lib/api';
 import { useSession, type User as SessionUser } from '@/lib/auth';
 import { MEDIA_LIBRARY_ENABLED } from '@/ottabase/config';
 import { PACKAGES_ENABLED } from '@/ottabase/config'; // otta:only ottaai
-import { changePassword, requestEmailVerification } from '@/lib/auth-api';
+import { requestEmailVerification } from '@/lib/auth-api';
+import { SettingsPage } from '@/components/SettingsPage';
 import { AiPersonalProviders } from './AiPersonalProviders'; // otta:only ottaai
 import { LanguageRegionCard } from './LanguageRegionCard';
 import {
@@ -31,14 +32,12 @@ import {
     DialogTitle,
     Input,
     Label,
-    PasswordInput,
     Separator,
 } from '@ottabase/ui';
-import { invalidateAuthSession } from '@ottabase/auth/react';
 import { IconExternalLink, IconPencil, IconTrash } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { Calendar, Check, Loader2, Mail, User } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AvatarEditModal } from './AvatarEditModal';
 
 interface LinkedAccountRecord {
@@ -105,14 +104,6 @@ export function UserProfilePage() {
     const [hasChanges, setHasChanges] = useState(false);
     const [verificationStatus, setVerificationStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
     const [verificationError, setVerificationError] = useState<string | null>(null);
-    const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
-    const [isChangingPassword, setIsChangingPassword] = useState(false);
-    const [passwordError, setPasswordError] = useState<string | null>(null);
-    const [passwordForm, setPasswordForm] = useState({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-    });
 
     const computeHasChanges = useCallback(
         (next: { name: string; email: string; timezone: string; locale: string }) => {
@@ -312,93 +303,22 @@ export function UserProfilePage() {
         }
     };
 
-    const resetPasswordDialogState = () => {
-        setPasswordError(null);
-        setPasswordForm({
-            currentPassword: '',
-            newPassword: '',
-            confirmPassword: '',
-        });
-    };
-
-    const handleChangePassword = async () => {
-        setPasswordError(null);
-
-        const currentPassword = passwordForm.currentPassword.trim();
-        const newPassword = passwordForm.newPassword.trim();
-        const confirmPassword = passwordForm.confirmPassword.trim();
-
-        if (!currentPassword) {
-            setPasswordError('Current password is required.');
-            return;
-        }
-
-        if (!newPassword) {
-            setPasswordError('New password is required.');
-            return;
-        }
-
-        if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/.test(newPassword) || newPassword.length < 8) {
-            setPasswordError(
-                'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.',
-            );
-            return;
-        }
-
-        if (newPassword !== confirmPassword) {
-            setPasswordError('New password and confirmation do not match.');
-            return;
-        }
-
-        if (newPassword === currentPassword) {
-            setPasswordError('New password must be different from current password.');
-            return;
-        }
-
-        setIsChangingPassword(true);
-        try {
-            const result = await changePassword({ currentPassword, newPassword });
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to update password.');
-            }
-
-            toast.success('Password updated', 'Please sign in again with your new password.');
-            resetPasswordDialogState();
-            setIsPasswordDialogOpen(false);
-            invalidateAuthSession();
-            if (typeof window !== 'undefined') {
-                window.location.href = '/login?notice=password-changed';
-            }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'Failed to update password.';
-            setPasswordError(message);
-            toast.error('Password update failed', message);
-        } finally {
-            setIsChangingPassword(false);
-        }
-    };
-
     if (!user) {
         return null;
     }
 
     return (
-        <div className="mx-auto max-w-3xl space-y-8">
-            {/* Header */}
-            <div className="space-y-4">
-                <div className="space-y-1.5">
-                    <h1 className="text-2xl font-semibold tracking-[-0.015em]">Profile Settings</h1>
-                    <p className="text-muted-foreground">Manage your account settings and preferences</p>
-                </div>
-                {MEDIA_LIBRARY_ENABLED && (
-                    <div>
-                        <Button variant="outline" size="sm" asChild>
-                            <Link to="/media-library">Open My Uploads</Link>
-                        </Button>
-                    </div>
-                )}
-            </div>
-
+        <SettingsPage
+            title="Profile"
+            description="Your name, picture and preferences. Password, two-factor and passkeys are under Security."
+            actions={
+                MEDIA_LIBRARY_ENABLED && (
+                    <Button variant="outline" size="sm" asChild>
+                        <Link to="/media-library">Open My Uploads</Link>
+                    </Button>
+                )
+            }
+        >
             {/* Profile Info */}
             <Card>
                 <CardHeader>
@@ -755,122 +675,6 @@ export function UserProfilePage() {
             {/* AI providers — personal keys. Dormant unless the ottaai package is enabled. */}
             {PACKAGES_ENABLED.ottaai ? <AiPersonalProviders /> : null}
             {/* otta:end ottaai */}
-
-            {/* Security */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-[0.9375rem] font-semibold">Security</CardTitle>
-                    <CardDescription>Manage your account security settings</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h4 className="text-sm font-medium">Password</h4>
-                            <p className="text-sm text-muted-foreground">Update your account password.</p>
-                        </div>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                resetPasswordDialogState();
-                                setIsPasswordDialogOpen(true);
-                            }}
-                        >
-                            Change Password
-                        </Button>
-                    </div>
-
-                    <Separator />
-
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h4 className="text-sm font-medium">Two-Factor Authentication</h4>
-                            <p className="text-sm text-muted-foreground">Add an extra layer of security</p>
-                        </div>
-                        <Button variant="outline" size="sm" disabled>
-                            Enable 2FA
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            <Dialog
-                open={isPasswordDialogOpen}
-                onOpenChange={(open) => {
-                    setIsPasswordDialogOpen(open);
-                    if (!open) {
-                        resetPasswordDialogState();
-                    }
-                }}
-            >
-                <DialogContent className="max-w-md">
-                    <DialogTitle>Change Password</DialogTitle>
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="currentPassword">Current Password</Label>
-                            <PasswordInput
-                                id="currentPassword"
-                                autoComplete="current-password"
-                                value={passwordForm.currentPassword}
-                                onChange={(e) =>
-                                    setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))
-                                }
-                                disabled={isChangingPassword}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="newPassword">New Password</Label>
-                            <PasswordInput
-                                id="newPassword"
-                                autoComplete="new-password"
-                                value={passwordForm.newPassword}
-                                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-                                disabled={isChangingPassword}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                            <PasswordInput
-                                id="confirmPassword"
-                                autoComplete="new-password"
-                                value={passwordForm.confirmPassword}
-                                onChange={(e) =>
-                                    setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
-                                }
-                                disabled={isChangingPassword}
-                            />
-                        </div>
-
-                        {passwordError && (
-                            <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                                {passwordError}
-                            </p>
-                        )}
-
-                        <div className="flex justify-end gap-2">
-                            <Button
-                                variant="outline"
-                                onClick={() => setIsPasswordDialogOpen(false)}
-                                disabled={isChangingPassword}
-                            >
-                                Cancel
-                            </Button>
-                            <Button onClick={handleChangePassword} disabled={isChangingPassword}>
-                                {isChangingPassword ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Updating...
-                                    </>
-                                ) : (
-                                    'Update Password'
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                </DialogContent>
-            </Dialog>
-        </div>
+        </SettingsPage>
     );
 }

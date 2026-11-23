@@ -13,6 +13,9 @@ export interface CredentialsFormProps {
     showRememberMe?: boolean;
     rememberMeLabel?: string;
     defaultRememberMe?: boolean;
+    /** Controlled "Remember me", when the parent needs it too (LoginForm hands it to the passkey button). */
+    rememberMe?: boolean;
+    onRememberMeChange?: (rememberMe: boolean) => void;
     /** A bot check (the `useTurnstile` widget) rendered above the submit button. */
     botCheck?: React.ReactNode;
     className?: string;
@@ -30,12 +33,19 @@ export function CredentialsForm({
     showRememberMe = true,
     rememberMeLabel = 'Remember me',
     defaultRememberMe = true,
+    rememberMe: controlledRememberMe,
+    onRememberMeChange,
     botCheck,
     className = '',
 }: CredentialsFormProps) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [rememberMe, setRememberMe] = useState(defaultRememberMe);
+    const [ownRememberMe, setOwnRememberMe] = useState(defaultRememberMe);
+    const rememberMe = controlledRememberMe ?? ownRememberMe;
+    const setRememberMe = (value: boolean) => {
+        setOwnRememberMe(value);
+        onRememberMeChange?.(value);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
