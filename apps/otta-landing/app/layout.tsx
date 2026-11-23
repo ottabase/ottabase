@@ -1,9 +1,15 @@
-import { getTheme, schemeInitScript, themeStyles } from '@ottabase/ottalanding';
+import { getTheme, SCHEME_STORAGE_KEY, themeStyles } from '@ottabase/ottalanding';
 import { fileUrl } from '@ottabase/utils/media';
-import { sanitizeCssForStyleTag } from '@ottabase/utils/sanitize';
+import { sanitizeCssForStyleTag, sanitizeJsonForScript } from '@ottabase/utils/sanitize';
 import type { Metadata } from 'next';
 import { getSite, isProduction, siteOrigin, turnstileKeys } from '../lib/content';
 import './globals.css';
+
+/**
+ * Applies the visitor's saved light/dark choice before first paint, so a dark-mode visitor never
+ * sees a light flash. Fixed markup: its only interpolation is the JSON-escaped storage key.
+ */
+const SCHEME_INIT_SCRIPT = `try{var s=localStorage.getItem(${sanitizeJsonForScript(SCHEME_STORAGE_KEY)});if(s==='light'||s==='dark')document.documentElement.setAttribute('data-scheme',s)}catch(e){}`;
 
 // Content is edited live in otta-web's admin, so every request reads the current site.
 export const dynamic = 'force-dynamic';
@@ -41,7 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         // saved light/dark choice before first paint (hence suppressHydrationWarning).
         <html lang="en" data-scheme={theme.scheme} suppressHydrationWarning>
             <head>
-                <script dangerouslySetInnerHTML={{ __html: schemeInitScript() }} />
+                <script dangerouslySetInnerHTML={{ __html: SCHEME_INIT_SCRIPT }} />
                 <style id="landing-theme" dangerouslySetInnerHTML={{ __html: sanitizeCssForStyleTag(css) }} />
                 {fonts.map((href) => (
                     <link key={href} rel="stylesheet" href={href} />

@@ -16,7 +16,10 @@
             "cache": false,
             "persistent": true
         },
-        "lint": {},
+        // The root eslint.config.mjs is the one config for every workspace: a rule change must bust the cache.
+        "lint": {
+            "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/eslint.config.mjs"]
+        },
         "type-check": {
             "dependsOn": ["^build"],
             "inputs": ["$TURBO_DEFAULT$", "tsconfig.json"]
@@ -24,6 +27,13 @@
         "test": {
             "dependsOn": ["^build"],
             "inputs": ["$TURBO_DEFAULT$", "jest.config.*", "vitest.config.*", "vitest.setup.*"],
+            "outputs": [],
+            "env": ["NODE_ENV=test"]
+        },
+        // lint-invariants.test.ts runs the root eslint.config.mjs: a rule change must re-run it.
+        "@ottabase/scripts#test": {
+            "dependsOn": ["^build"],
+            "inputs": ["$TURBO_DEFAULT$", "vitest.config.*", "vitest.setup.*", "$TURBO_ROOT$/eslint.config.mjs"],
             "outputs": [],
             "env": ["NODE_ENV=test"]
         },

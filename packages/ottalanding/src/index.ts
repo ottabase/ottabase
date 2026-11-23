@@ -15,7 +15,7 @@ export type { Section, SectionData, SectionType } from './sections';
 export { PAGE_CONTENT_BUDGET_BYTES, PAGE_PATH, PageInputSchema, SITE_FIELDS, SiteSettingsSchema } from './site';
 export type { LandingPageData, PageInput, SiteSettings } from './site';
 export { getTheme, readableOn, themeAccent, themeFonts, THEMES, themeStyles } from './themes';
-export { schemeInitScript, SCHEME_STORAGE_KEY } from './scheme';
+export { SCHEME_STORAGE_KEY } from './scheme';
 export type { ColorScheme, LandingTheme, ThemeId } from './themes';
 export { DEFAULT_PAGES, DEFAULT_SITE } from './defaults';
 export { SHARE_CARD_SIZE, SHARE_FIELDS } from './share-card';

@@ -86,22 +86,22 @@ doc reaches it on its next deploy. See [`apps/otta-docs-mcp/README.md`](apps/ott
 package. These rules exist because the prose above was not enough on its own — `errorResponse(...)` was an Always-On
 Rule for months while hand-rolled JSON error responses kept shipping.
 
-| Rule                                 | What it blocks                                                   | Do this instead                                                              |
-| ------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `no-restricted-globals` (client)     | raw `fetch()` in `apps/*/src/**`                                 | `useApiQuery` / `createModelHooks` / `useApiMutation` / `useApiClient()`     |
-| `no-restricted-imports` (client)     | `createApiClient` outside `src/lib/api.ts`                       | build the client once, pass it to `OttaQueryProvider`                        |
-| `no-restricted-syntax` (server)      | `new Response(JSON.stringify(...))`                              | `errorResponse(...)` / `jsonResponse(...)` from `@ottabase/utils`            |
-| `no-restricted-syntax` (server)      | `process.env` in edge code                                       | read the env binding via `getOttabaseConfig(env)`                            |
-| `ottabase/no-raw-error-log` (server) | `console.error(error)` with a raw thrown value                   | `redactErrorForLog(error)` from `@ottabase/utils/http-errors`                |
-| `react-hooks/rules-of-hooks`         | hooks called after an early return                               | call every hook unconditionally, branch in the returned JSX                  |
-| `ottabase/no-node-only-imports`      | `fs`, `child_process`, threads in edge/browser code              | a binding through `@ottabase/cf`; Node work goes in `packages/cli`/`scripts` |
-| `ottabase/headless-root`             | a package root reaching `react-dom` or the UI kit (one hop deep) | export rendered UI from a subpath (`./react`)                                |
-| `ottabase/sanitized-inner-html`      | `dangerouslySetInnerHTML` without a sanitizer                    | `sanitizeBlockHtml(...)` and friends, or a value named `sanitized...`        |
-| `ottabase/no-raw-d1`                 | `env.OBCF_D1.prepare/exec/batch` in app server code              | a model method (RLS, tenant scope, casts come with it)                       |
+| Rule                                 | What it blocks                                                        | Do this instead                                                                |
+| ------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `no-restricted-globals` (client)     | raw `fetch()` in `apps/*/src/**`                                      | `useApiQuery` / `createModelHooks` / `useApiMutation` / `useApiClient()`       |
+| `no-restricted-imports` (client)     | `createApiClient` outside `src/lib/api.ts`                            | build the client once, pass it to `OttaQueryProvider`                          |
+| `no-restricted-syntax` (server)      | `new Response(JSON.stringify(...))`                                   | `errorResponse(...)` / `jsonResponse(...)` from `@ottabase/utils`              |
+| `no-restricted-syntax` (server)      | `process.env` in edge code                                            | read the env binding via `getOttabaseConfig(env)`                              |
+| `ottabase/no-raw-error-log` (server) | `console.error(error)` with a raw thrown value                        | `redactErrorForLog(error)` from `@ottabase/utils/http-errors`                  |
+| `react-hooks/rules-of-hooks`         | hooks called after an early return                                    | call every hook unconditionally, branch in the returned JSX                    |
+| `ottabase/no-node-only-imports`      | `fs`, `child_process`, threads in edge/browser code                   | a binding through `@ottabase/cf`; Node work goes in `packages/cli`/`scripts`   |
+| `ottabase/headless-root`             | a package root reaching `react-dom` or the UI kit (one hop deep)      | export rendered UI from a subpath (`./react`)                                  |
+| `ottabase/sanitized-inner-html`      | `dangerouslySetInnerHTML` (spread or `createElement` too) unsanitized | an exported sanitizer (`sanitizeBlockHtml(...)` and friends) or `sanitized...` |
+| `ottabase/no-raw-d1`                 | any use of a D1 binding in app server code beyond a presence check    | a model method (RLS, tenant scope, casts come with it)                         |
 
-The invariants cover Ottabase Pro too (`packages/pro/*/src`). Each rule has sanctioned files in `eslint.config.mjs`
-(Node-only entrypoints, the bootstrap that runs before the models' tables exist, static markup) with the reason beside
-them; `packages/scripts/src/__tests__/lint-invariants.test.ts` proves every rule fires.
+The invariants cover Ottabase Pro too (`packages/pro/*/src` and its `app/` templates). Each rule has sanctioned files in
+`eslint.config.mjs` (Node-only entrypoints, the bootstrap that runs before the models' tables exist, static markup) with
+the reason beside them; `packages/scripts/src/__tests__/lint-invariants.test.ts` proves every rule fires.
 
 Rules of engagement:
 

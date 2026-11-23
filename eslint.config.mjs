@@ -29,28 +29,45 @@ import storybook from 'eslint-plugin-storybook';
 // ============================================================
 
 /** Browser/client code. Must reach the network through the provider client. */
-const CLIENT_GLOBS = ['apps/*/src/**/*.{ts,tsx}'];
+const CLIENT_GLOBS = [
+    'apps/*/src/**/*.{ts,tsx}',
+    // A Pro package's page templates, copied into an app's src/ by `otta add`: linted where they live.
+    'packages/pro/*/app/src/**/*.{ts,tsx}',
+];
 
-/** Edge/server code: Workers, route handlers, and framework package sources. */
-const SERVER_GLOBS = [
-    'apps/*/worker/**/*.ts',
+/** App server code: the Worker, its composition, and the Next.js server side. */
+const APP_SERVER_GLOBS = [
+    'apps/*/worker/**/*.{ts,tsx}',
     'apps/*/ottabase/**/*.{ts,tsx}',
     'apps/*/cloudflare-worker.ts',
     // Next.js (OpenNext) apps: the App Router and its server helpers run on the Worker.
     'apps/*/app/**/*.{ts,tsx}',
     'apps/*/lib/**/*.{ts,tsx}',
+    // A Pro package's composition templates, copied into an app's ottabase/ by `otta add`.
+    'packages/pro/*/app/ottabase/**/*.{ts,tsx}',
+];
+
+/** Edge/server code: app server code and framework package sources. */
+const SERVER_GLOBS = [
+    ...APP_SERVER_GLOBS,
     'packages/*/src/**/*.{ts,tsx}',
     // Ottabase Pro, subtree'd into a buyer's monorepo at packages/pro: the same invariants hold.
     'packages/pro/*/src/**/*.{ts,tsx}',
 ];
 
-/** Node-only tooling. Genuinely allowed to use `process`, raw responses, etc. */
+/**
+ * Node-only tooling. Genuinely allowed to use `process`, raw responses, etc. A `scripts/` folder
+ * counts only at a workspace's top level: one inside `worker/` or `src/` ships to the edge.
+ */
 const TOOLING_GLOBS = [
     'packages/scripts/**',
     'packages/cli/**',
     'packages/docs/**',
     '**/*.config.{ts,js,cjs,mjs}',
-    '**/scripts/**',
+    'scripts/**',
+    'apps/*/scripts/**',
+    'packages/*/scripts/**',
+    'packages/pro/*/scripts/**',
     // Pro Blackbox's source-map uploader: a Node CLI run after `vite build`, never bundled.
     'packages/pro/blackbox/src/upload.ts',
 ];
@@ -126,21 +143,43 @@ const NODE_ONLY_MODULES = new Set([
     'v8',
 ]);
 
-/** Modules that render DOM UI: a headless root entrypoint must not reach them (mobile imports it). */
-const RENDERED_MODULE = /^(react-dom|@ottabase\/ui|lucide-react|@tabler\/icons-react|@radix-ui\/)/;
+/**
+ * Modules that render DOM UI: a headless root entrypoint must not reach them (mobile imports it).
+ * The UI kit is `@ottabase/ui` and its subpaths, and the `@ottabase/ui-*` packages, which render
+ * by default (every current one does, and a new one is assumed to);
+ * the one whose root is headless, ui-datatable (hooks at the root, components at /react), counts
+ * only through a subpath. `@ottabase/uikit-x` is not the UI kit.
+ */
+const RENDERED_MODULE =
+    /^(react-dom(\/.*)?|@ottabase\/ui(\/.*)?|@ottabase\/ui-(?!datatable$)[a-z0-9-]+(\/.*)?|lucide-react(\/.*)?|@tabler\/icons-react(\/.*)?|@radix-ui\/.*)$/;
 
-/** Import, re-export, dynamic import and require sources in a file, as [node, source] pairs. */
+/** The string a module source node names, or null (a template literal only without expressions). */
+function sourceText(node) {
+    if (!node) return null;
+    if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+    if (node.type === 'TemplateLiteral' && node.expressions.length === 0) return node.quasis[0].value.cooked;
+    return null;
+}
+
+/** A type-only import or export is erased at build time: it pulls nothing into the bundle. */
+function isTypeOnly(node) {
+    if (node.importKind === 'type' || node.exportKind === 'type') return true;
+    const specifiers = node.specifiers ?? [];
+    return (
+        node.type === 'ImportDeclaration' &&
+        specifiers.length > 0 &&
+        specifiers.every((specifier) => specifier.importKind === 'type')
+    );
+}
+
+/** Import, re-export, dynamic import and require sources of a node (type-only ones left out). */
 function moduleSources(node) {
-    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') return [node.source?.value];
-    if (node.type === 'ExportNamedDeclaration') return node.source ? [node.source.value] : [];
-    if (node.type === 'ImportExpression' && node.source.type === 'Literal') return [node.source.value];
-    if (
-        node.type === 'CallExpression' &&
-        node.callee.type === 'Identifier' &&
-        node.callee.name === 'require' &&
-        node.arguments[0]?.type === 'Literal'
-    ) {
-        return [node.arguments[0].value];
+    if (isTypeOnly(node)) return [];
+    if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') return [sourceText(node.source)];
+    if (node.type === 'ExportNamedDeclaration') return node.source ? [sourceText(node.source)] : [];
+    if (node.type === 'ImportExpression') return [sourceText(node.source)];
+    if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require') {
+        return [sourceText(node.arguments[0])];
     }
     return [];
 }
@@ -153,18 +192,36 @@ const SOURCE_NODES = [
     'CallExpression',
 ];
 
-/** The specifiers a module file imports, read from disk (for the one-hop headless check). */
+/**
+ * The modules a file on disk reaches, for the one-hop checks: `{ source, lazy }`, `lazy` for a
+ * dynamic `import()`. Comments and type-only imports/exports are left out.
+ */
 function importsOf(file) {
+    let text;
     try {
-        const text = fs.readFileSync(file, 'utf8');
-        return [...text.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
+        text = fs.readFileSync(file, 'utf8');
     } catch {
         return [];
     }
+    // Drop comments first, so a module named in a comment is not taken for an import. (A `//`
+    // inside a string is rare in import-bearing code; a URL string loses its tail, nothing more.)
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+    const found = [];
+    for (const match of code.matchAll(
+        /\b(import|export)\s+(type\s+)?(?:[\w*{}\s,$]+?\s+from\s+)?['"]([^'"]+)['"]|\b(import|require)\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
+    )) {
+        if (match[3] !== undefined) {
+            if (!match[2]) found.push({ source: match[3], lazy: false });
+        } else {
+            found.push({ source: match[5], lazy: match[4] === 'import' });
+        }
+    }
+    return found;
 }
 
+/** A relative specifier resolved to a source file (`./x.js` is `./x.ts` under TypeScript's ESM rules). */
 function resolveRelative(fromFile, specifier) {
-    const base = path.resolve(path.dirname(fromFile), specifier);
+    const base = path.resolve(path.dirname(fromFile), specifier.replace(/\.(m|c)?jsx?$/, ''));
     for (const suffix of ['.ts', '.tsx', '/index.ts', '/index.tsx', '']) {
         const candidate = base + suffix;
         if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
@@ -172,32 +229,104 @@ function resolveRelative(fromFile, specifier) {
     return null;
 }
 
-/** Is `__html` given something visibly sanitized: a sanitize*() call, a `sanitized*` value, or a constant? */
-function isSanitizedHtml(expression) {
-    if (!expression) return false;
-    if (expression.type === 'CallExpression') {
-        const callee = expression.callee;
-        const name =
-            callee.type === 'Identifier' ? callee.name : callee.type === 'MemberExpression' ? callee.property.name : '';
-        return /^sanitize/.test(name ?? '');
+/** The exported helpers of @ottabase/utils/sanitize. Nothing else counts as a sanitizer. */
+const SANITIZERS = new Set([
+    'sanitizeBlockHtml',
+    'sanitizeInlineHtml',
+    'sanitizeSvgHtml',
+    'sanitizeJsonForScript',
+    'sanitizeCssForStyleTag',
+]);
+/** `sanitized`, `sanitizedHtml`: a value one of them produced. Not `sanitizedish` or `Sanitized`. */
+const SANITIZED_NAME = /^sanitized([A-Z]|$)/;
+const CONSTANT_NAME = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * A SCREAMING_CASE `const` in this file holding markup the app writes itself: a plain string, or a
+ * template whose every interpolation passes this rule (`${sanitizeJsonForScript(KEY)}`).
+ */
+function isStringConstant(identifier, context) {
+    if (!CONSTANT_NAME.test(identifier.name)) return false;
+    for (let scope = context.sourceCode.getScope(identifier); scope; scope = scope.upper) {
+        const variable = scope.set.get(identifier.name);
+        if (!variable) continue;
+        const definition = variable.defs[0];
+        if (definition?.type !== 'Variable' || definition.parent.kind !== 'const') return false;
+        const init = definition.node.init;
+        return (
+            (init?.type === 'Literal' && typeof init.value === 'string') ||
+            (init?.type === 'TemplateLiteral' && init.expressions.every((part) => isSanitizedHtml(part, context)))
+        );
     }
-    if (expression.type === 'Identifier') return /^sanitized/i.test(expression.name);
-    if (expression.type === 'ConditionalExpression') {
-        return isSanitizedHtml(expression.consequent) && isSanitizedHtml(expression.alternate);
-    }
-    if (expression.type === 'Literal') return typeof expression.value === 'string';
-    if (expression.type === 'TemplateLiteral') return expression.expressions.length === 0;
     return false;
 }
 
-/** `env.OBCF_D1.prepare(...)` and friends: a D1 binding called directly. */
-function isRawD1Call(node) {
-    const callee = node.callee;
-    if (callee.type !== 'MemberExpression' || !['prepare', 'exec', 'batch'].includes(callee.property.name))
-        return false;
-    let target = callee.object;
-    if (target.type === 'TSNonNullExpression') target = target.expression;
-    return target.type === 'MemberExpression' && /(^|_)D1$/.test(target.property.name ?? '');
+/**
+ * Is `__html` given something visibly sanitized: a sanitizer call, a `sanitized*` value (or
+ * property), a string constant, or a choice / fallback / template made only of those?
+ */
+function isSanitizedHtml(expression, context) {
+    if (!expression) return false;
+    switch (expression.type) {
+        case 'CallExpression': {
+            const callee = expression.callee;
+            const name =
+                callee.type === 'Identifier'
+                    ? callee.name
+                    : callee.type === 'MemberExpression' && !callee.computed
+                      ? callee.property.name
+                      : '';
+            return SANITIZERS.has(name);
+        }
+        case 'Identifier':
+            return SANITIZED_NAME.test(expression.name) || isStringConstant(expression, context);
+        case 'MemberExpression':
+            return !expression.computed && SANITIZED_NAME.test(expression.property.name ?? '');
+        case 'ConditionalExpression':
+            return isSanitizedHtml(expression.consequent, context) && isSanitizedHtml(expression.alternate, context);
+        case 'LogicalExpression':
+            return isSanitizedHtml(expression.left, context) && isSanitizedHtml(expression.right, context);
+        case 'TemplateLiteral':
+            return expression.expressions.every((part) => isSanitizedHtml(part, context));
+        case 'Literal':
+            return typeof expression.value === 'string';
+        default:
+            return false;
+    }
+}
+
+/** A D1 binding's name: `OBCF_D1`, `D1`, `ANALYTICS_D1`. */
+const D1_BINDING = /(^|_)D1$/;
+
+/**
+ * `!env.OBCF_D1`, `Boolean(env.OBCF_D1)`, `x === env.OBCF_D1`: a presence or identity test yields a
+ * boolean, never a handle on the binding, so it is not a use. (`?.`, `!` and `as` wrappers are seen
+ * through.)
+ */
+function isPresenceTest(node) {
+    let child = node;
+    let parent = node.parent;
+    while (parent && ['ChainExpression', 'TSNonNullExpression', 'TSAsExpression'].includes(parent.type)) {
+        child = parent;
+        parent = parent.parent;
+    }
+    if (!parent) return false;
+    if (parent.type === 'UnaryExpression') return parent.operator === '!' || parent.operator === 'typeof';
+    if (parent.type === 'BinaryExpression') return ['===', '!==', '==', '!='].includes(parent.operator);
+    return (
+        parent.type === 'CallExpression' &&
+        parent.callee.type === 'Identifier' &&
+        parent.callee.name === 'Boolean' &&
+        parent.arguments[0] === child
+    );
+}
+
+/** The name a member access or destructured key reads, when it is static (`a.b`, `a['b']`, `{ b }`). */
+function staticKey(key, computed) {
+    if (!computed && key.type === 'Identifier') return key.name;
+    if (key.type === 'Literal' && typeof key.value === 'string') return key.value;
+    if (key.type === 'TemplateLiteral' && key.expressions.length === 0) return key.quasis[0].value.cooked;
+    return null;
 }
 
 const RAW_ERROR_LOG_SELECTOR =
@@ -237,16 +366,29 @@ const ottabasePlugin = {
                 schema: [],
                 messages: {
                     nodeOnly:
-                        '"{{name}}" is Node-only: Cloudflare Workers and browsers have no filesystem, processes or threads. Use an R2/KV/D1 binding through @ottabase/cf, or move this into tooling (packages/cli, packages/scripts).',
+                        '"{{name}}" is Node-only{{via}}: Cloudflare Workers and browsers have no filesystem, processes or threads. Use an R2/KV/D1 binding through @ottabase/cf, or move this into tooling (packages/cli, packages/scripts).',
                 },
             },
             create(context) {
+                const isNodeOnly = (source) => NODE_ONLY_MODULES.has(source.replace(/^node:/, ''));
                 const check = (node) => {
                     for (const source of moduleSources(node)) {
                         if (typeof source !== 'string') continue;
-                        const name = source.replace(/^node:/, '');
-                        if (NODE_ONLY_MODULES.has(name))
-                            context.report({ node, messageId: 'nodeOnly', data: { name: source } });
+                        if (isNodeOnly(source)) {
+                            context.report({ node, messageId: 'nodeOnly', data: { name: source, via: '' } });
+                        } else if (source.startsWith('.') && node.type.startsWith('Export')) {
+                            // One hop through a relative re-export: a barrel that re-exports a sanctioned
+                            // Node-only file (a lazy, guarded import() there does not count) still ships it.
+                            const resolved = resolveRelative(context.filename, source);
+                            const hit = resolved && importsOf(resolved).find((i) => !i.lazy && isNodeOnly(i.source));
+                            if (hit) {
+                                context.report({
+                                    node,
+                                    messageId: 'nodeOnly',
+                                    data: { name: hit.source, via: ` (re-exported through ${source})` },
+                                });
+                            }
+                        }
                     }
                 };
                 return Object.fromEntries(SOURCE_NODES.map((type) => [type, check]));
@@ -277,12 +419,12 @@ const ottabasePlugin = {
                             context.report({ node, messageId: 'rendered', data: { module: source, via: '' } });
                         } else if (source.startsWith('.')) {
                             const resolved = resolveRelative(file, source);
-                            const hit = resolved && importsOf(resolved).find((inner) => RENDERED_MODULE.test(inner));
+                            const hit = resolved && importsOf(resolved).find((i) => RENDERED_MODULE.test(i.source));
                             if (hit) {
                                 context.report({
                                     node,
                                     messageId: 'rendered',
-                                    data: { module: hit, via: ` through ${source}` },
+                                    data: { module: hit.source, via: ` through ${source}` },
                                 });
                             }
                         }
@@ -293,9 +435,10 @@ const ottabasePlugin = {
         },
 
         /**
-         * Every `dangerouslySetInnerHTML` payload is visibly sanitized where it is used:
-         * `sanitizeBlockHtml(...)` and the other helpers of @ottabase/utils/sanitize, or a value
-         * named `sanitized*` that one of them produced.
+         * Every `dangerouslySetInnerHTML` payload is visibly sanitized where it is used, in JSX, in
+         * a spread object or in a `createElement` props object: a helper of
+         * @ottabase/utils/sanitize, a value named `sanitized*` that one of them produced, or a
+         * string constant the file declares (`const SCHEME_INIT_SCRIPT = '...'`).
          */
         'sanitized-inner-html': {
             meta: {
@@ -304,43 +447,59 @@ const ottabasePlugin = {
                 schema: [],
                 messages: {
                     unsanitized:
-                        'Pass __html through a sanitizer from @ottabase/utils/sanitize (sanitizeBlockHtml, sanitizeInlineHtml, sanitizeSvgHtml, sanitizeJsonForScript, sanitizeCssForStyleTag), or name the sanitized value `sanitized...`.',
+                        'Pass __html through a sanitizer from @ottabase/utils/sanitize (sanitizeBlockHtml, sanitizeInlineHtml, sanitizeSvgHtml, sanitizeJsonForScript, sanitizeCssForStyleTag), name the sanitized value `sanitized...`, or declare fixed markup as a SCREAMING_CASE string const in this file.',
                 },
             },
             create(context) {
+                const check = (node, value) => {
+                    const html =
+                        value?.type === 'ObjectExpression'
+                            ? value.properties.find(
+                                  (property) =>
+                                      property.type === 'Property' &&
+                                      staticKey(property.key, property.computed) === '__html',
+                              )?.value
+                            : null;
+                    if (!isSanitizedHtml(html, context)) context.report({ node, messageId: 'unsanitized' });
+                };
                 return {
                     "JSXAttribute[name.name='dangerouslySetInnerHTML']"(node) {
-                        const value = node.value?.type === 'JSXExpressionContainer' ? node.value.expression : null;
-                        const html =
-                            value?.type === 'ObjectExpression'
-                                ? value.properties.find(
-                                      (property) =>
-                                          property.type === 'Property' &&
-                                          (property.key.name === '__html' || property.key.value === '__html'),
-                                  )?.value
-                                : null;
-                        if (!isSanitizedHtml(html)) context.report({ node, messageId: 'unsanitized' });
+                        check(node, node.value?.type === 'JSXExpressionContainer' ? node.value.expression : null);
+                    },
+                    // `{...{ dangerouslySetInnerHTML: x }}`, `createElement('div', { dangerouslySetInnerHTML: x })`.
+                    'ObjectExpression > Property'(node) {
+                        if (staticKey(node.key, node.computed) === 'dangerouslySetInnerHTML') check(node, node.value);
                     },
                 };
             },
         },
 
-        /** App code reaches D1 through OttaORM models, which carry RLS and the tenant scope. */
+        /**
+         * App server code never touches a D1 binding: not to call it, not to pass it around, not to
+         * destructure it. Queries go through OttaORM models, which carry RLS and the tenant scope;
+         * the binding reaches the ORM once, in the sanctioned driver registration.
+         */
         'no-raw-d1': {
             meta: {
                 type: 'problem',
                 docs: { description: 'Use OttaORM models instead of the raw D1 binding in app code' },
                 schema: [],
                 messages: {
-                    rawD1: 'Raw D1 ({{method}}) skips OttaORM: no RLS, no tenant scope, no casts. Use a model method (a fat model owns its queries).',
+                    rawD1: 'Raw D1 binding ({{name}}) skips OttaORM: no RLS, no tenant scope, no casts. Use a model method (a fat model owns its queries).',
                 },
             },
             create(context) {
+                const report = (node, name) => context.report({ node, messageId: 'rawD1', data: { name } });
                 return {
-                    CallExpression(node) {
-                        if (isRawD1Call(node)) {
-                            context.report({ node, messageId: 'rawD1', data: { method: node.callee.property.name } });
-                        }
+                    // `env.OBCF_D1`, `env['OBCF_D1']`, `env?.OBCF_D1`, `(env.OBCF_D1 as D1Database)`.
+                    MemberExpression(node) {
+                        const name = staticKey(node.property, node.computed);
+                        if (name && D1_BINDING.test(name) && !isPresenceTest(node)) report(node, name);
+                    },
+                    // `const { OBCF_D1 } = env`, `({ OBCF_D1: db }) => ...`.
+                    'ObjectPattern > Property'(node) {
+                        const name = staticKey(node.key, node.computed);
+                        if (name && D1_BINDING.test(name)) report(node, name);
                     },
                 };
             },
@@ -453,7 +612,7 @@ export default [
     // ---- Invariant: a package's root entrypoint stays headless ----
     // Component libraries are rendered by design: their root IS the UI.
     {
-        files: ['packages/*/src/index.ts', 'packages/pro/*/src/index.ts'],
+        files: ['packages/*/src/index.{ts,tsx}', 'packages/pro/*/src/index.{ts,tsx}'],
         ignores: [
             'packages/ui/**',
             'packages/ui-*/**',
@@ -467,21 +626,24 @@ export default [
 
     // ---- Invariant: dangerouslySetInnerHTML goes through a sanitizer ----
     {
-        files: ['**/*.tsx'],
+        files: ['**/*.{ts,tsx}'],
         rules: { 'ottabase/sanitized-inner-html': 'error' },
     },
 
     // ---- Invariant: app server code reaches D1 through OttaORM models ----
     {
-        files: [
-            'apps/*/worker/**/*.ts',
-            'apps/*/ottabase/**/*.{ts,tsx}',
-            'apps/*/app/**/*.{ts,tsx}',
-            'apps/*/lib/**/*.{ts,tsx}',
-            'apps/*/cloudflare-worker.ts',
-        ],
+        files: APP_SERVER_GLOBS,
         rules: { 'ottabase/no-raw-d1': 'error' },
     },
+
+    // ============================================================
+    // Sanctions
+    // ============================================================
+    //
+    // Every app-level sanction and RATCHET entry below says `apps/*`, not `apps/otta-web`: each
+    // app here is a template that `otta new` copies whole (otta-web, otta-landing, otta-worker),
+    // and `otta presets check` lints the copy, so the entry follows its file into the new app.
+    // ============================================================
 
     // ---- Sanctioned Node-only entrypoints (never imported by edge code) ----
     // A package's explicit Node subpath (file and git helpers, the headless-browser runner), the
@@ -498,10 +660,10 @@ export default [
         rules: { 'ottabase/no-node-only-imports': 'off' },
     },
 
-    // ---- Sanctioned raw D1: no model exists yet, or raw SQL is the feature ----
-    // The bootstrap runs before the tables (and so the models) exist; the database console and
-    // the D1 demo exist to run SQL.
+    // ---- Sanctioned D1 binding readers ----
     {
+        // Raw SQL is the point, or no model exists yet: the bootstrap runs before the tables (and
+        // so the models) exist; the database console and the D1 demo exist to run SQL.
         files: [
             'apps/*/worker/bootstrap/**/*.ts',
             'apps/*/worker/routes/admin-db.ts',
@@ -509,12 +671,32 @@ export default [
         ],
         rules: { 'ottabase/no-raw-d1': 'off' },
     },
+    {
+        // Where the binding becomes the ORM's driver, which is how every query gets RLS: the
+        // Worker's connection registration (db-utils), the landing's (lib/content), the migration
+        // runner (ottaorm-init), the cron task repository, and the package compositions whose
+        // manifest takes a driver factory (meter, vault).
+        files: [
+            'apps/*/worker/lib/db-utils.ts',
+            'apps/*/lib/content.ts',
+            'apps/*/worker/routes/ottaorm-init.ts',
+            'apps/*/ottabase/cron/index.ts',
+            'apps/*/worker/cron.ts',
+            'apps/*/ottabase/packages/meter.ts',
+            'apps/*/ottabase/packages/vault.ts',
+        ],
+        rules: { 'ottabase/no-raw-d1': 'off' },
+    },
+    {
+        // Brand Engine persistence takes the binding in its env and reads its own tables through it.
+        files: ['apps/*/worker/lib/brand-html-inject.ts', 'apps/*/worker/lib/brand-utils.ts'],
+        rules: { 'ottabase/no-raw-d1': 'off' },
+    },
 
     // ---- Sanctioned static markup in innerHTML ----
-    // The landing's colour-scheme script is a constant the app writes; the editor palette's icons
-    // are its own built-in SVG strings. Neither carries user input.
+    // The editor palette's icons are its own built-in SVG strings, kept in a lookup map: no user input.
     {
-        files: ['apps/*/app/layout.tsx', 'packages/ottaeditor/src/BlockPalette.tsx'],
+        files: ['packages/ottaeditor/src/BlockPalette.tsx'],
         rules: { 'ottabase/sanitized-inner-html': 'off' },
     },
 
@@ -660,6 +842,22 @@ export default [
         // memberships by hand; an AuditLog model method should own them.
         // Fix: move the query into a model method and call that.
         files: ['apps/*/worker/routes/audit.ts'],
+        rules: { 'ottabase/no-raw-d1': 'off' },
+    },
+    {
+        // Routes and helpers that re-register the default connection themselves
+        // (`registerConnection('default', createD1Driver(env.OBCF_D1))`), predating the rule's
+        // binding-level check. No raw query: the driver is still the ORM's. The registration is
+        // db-utils' job alone.
+        // Fix: call the db-utils initializer instead, and delete the entry.
+        files: [
+            'apps/*/worker/lib/auth-utils.ts',
+            'apps/*/worker/lib/email-provider.ts',
+            'apps/*/worker/routes/auth.ts',
+            'apps/*/worker/routes/blog.ts',
+            'apps/*/worker/routes/ottaorm-crud.ts',
+            'apps/*/worker/routes/referrals.ts',
+        ],
         rules: { 'ottabase/no-raw-d1': 'off' },
     },
 ];

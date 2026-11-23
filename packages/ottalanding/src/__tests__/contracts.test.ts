@@ -4,8 +4,6 @@ import { DEFAULT_PAGES, DEFAULT_SITE } from '../defaults';
 import * as root from '../index';
 import {
     newSection,
-    SCHEME_STORAGE_KEY,
-    schemeInitScript,
     PageInputSchema,
     readableOn,
     themeAccent,
@@ -200,13 +198,6 @@ describe('themes', () => {
         expect(themeAccent('nope')).toBe(themeAccent('launch'));
         expect(readableOn('#ffffff')).toBe('#111111');
         expect(readableOn('#000000')).toBe('#ffffff');
-    });
-
-    it('applies a saved choice before paint, accepting only light or dark', () => {
-        const script = schemeInitScript();
-        expect(script).toContain(`localStorage.getItem("${SCHEME_STORAGE_KEY}")`);
-        expect(script).toContain("s==='light'||s==='dark'");
-        expect(script).not.toMatch(/<\/script/i);
     });
 });
 

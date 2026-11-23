@@ -208,14 +208,18 @@ site's **logo** appears in every theme's navigation (`SiteBrand`), next to the n
 site name" is on, in which case the name becomes the logo's alt text.
 
 ```tsx
-import { getTheme, schemeInitScript, themeStyles } from '@ottabase/ottalanding';
+import { getTheme, SCHEME_STORAGE_KEY, themeStyles } from '@ottabase/ottalanding';
 import { LandingView } from '@ottabase/ottalanding/react';
+import { sanitizeJsonForScript } from '@ottabase/utils/sanitize';
+
+// Fixed markup declared in the file that renders it, which the sanitized-inner-html lint rule accepts.
+const SCHEME_INIT_SCRIPT = `try{var s=localStorage.getItem(${sanitizeJsonForScript(SCHEME_STORAGE_KEY)});if(s==='light'||s==='dark')document.documentElement.setAttribute('data-scheme',s)}catch(e){}`;
 
 const theme = getTheme(site.theme);
 const { css, fonts } = themeStyles(theme.id); // inject in <head>
 <html data-scheme={theme.scheme} suppressHydrationWarning>
     <head>
-        <script dangerouslySetInnerHTML={{ __html: schemeInitScript() }} /> {/* before the styles */}…
+        <script dangerouslySetInnerHTML={{ __html: SCHEME_INIT_SCRIPT }} /> {/* before the styles */}…
     </head>
     <LandingView site={site} sections={page.sections} currentPath="/pricing" />
 </html>;
@@ -228,8 +232,8 @@ taken from its preset.
 
 - **Visitors** switch with the toggle in the navigation (`SchemeToggle`). It sets `data-scheme` on `<html>` and saves
   the choice in `localStorage` under `ottalanding.scheme`.
-- **First paint** is already correct: `schemeInitScript()` re-applies a saved choice before the stylesheet paints.
-  Without a saved choice, the theme's default (server-rendered as `data-scheme`) stays.
+- **First paint** is already correct: the layout's `SCHEME_INIT_SCRIPT` re-applies a saved choice before the stylesheet
+  paints. Without a saved choice, the theme's default (server-rendered as `data-scheme`) stays.
 - **CSS:** `selector` holds the default palette, and `selector[data-scheme="light|dark"]` pins either one. Components
   use only design tokens, so nothing inside a theme needs a `dark:` variant.
 - **Admin preview:** `<LandingPreview scheme="dark">` renders a page in either mode inside its own scoped frame.

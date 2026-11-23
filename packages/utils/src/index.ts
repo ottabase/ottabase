@@ -3,8 +3,6 @@ export * from './currency';
 export * from './email';
 export * from './email-gmail';
 export * from './env';
-export * from './file';
-export * from './git';
 export * from './http-errors';
 export * from './http-response';
 export * from './json';
