@@ -21,7 +21,9 @@ import {
     verificationTokensTable,
 } from '@ottabase/ottaorm';
 import { createD1Driver } from '@ottabase/db/drizzle-d1';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { signInWithCredentials } from '../client-api';
+import { getFactors, getTwoFactorChallenge, submitTwoFactor } from '../client-factors';
 import type { AuthEnv, CreateAuthConfigOptions, SecondFactorPolicyInput } from '../types';
 import { createPasskey, signIn as signInWithPasskey, type SoftAlgorithm } from './soft-authenticator';
 import { createSqliteD1 } from './sqlite-d1';
@@ -387,6 +389,18 @@ describe('enrolling an authenticator app', () => {
         const recovered = await b.post('/api/auth/two-factor/challenge', { recoveryCode: recoveryCodes[0] });
         expect(recovered.status).toBe(200);
         expect(b.hasSession()).toBe(true);
+    });
+
+    it('sweeps expired attempt rows of other sign-ins when a new guess is counted', async () => {
+        await VerificationToken.recordAttempts([{ identifier: 'factor-attempt:old-sign-in', expires: Date.now() - 1 }]);
+        await VerificationToken.recordAttempts([{ identifier: 'magic-link:keep', expires: Date.now() - 1 }]);
+        const { secret } = await enrollTotp();
+        const { b } = await passwordSignIn();
+        // A code from well outside the accepted window: a wrong guess, counted.
+        await b.post('/api/auth/two-factor/challenge', { code: await codeFor(secret, 5) });
+        expect(await VerificationToken.countByIdentifier('factor-attempt:old-sign-in')).toBe(0);
+        // Only attempt rows are swept.
+        expect(await VerificationToken.countByIdentifier('magic-link:keep')).toBe(1);
     });
 });
 
@@ -847,5 +861,52 @@ describe('a policy that requires two-factor', () => {
         const { b, response } = await passwordSignIn();
         expect(response.status).toBe(500);
         expect(b.hasSession()).toBe(false);
+    });
+});
+
+describe('the browser client against the real routes', () => {
+    /** Points the client's fetch at the handler through one browser's cookie jar. */
+    function clientThrough(b: Browser) {
+        vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) =>
+            b.send(String(input), { method: init.method, body: init.body as string | undefined }),
+        );
+    }
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('signs in with a password, reads the challenge, refuses a wrong code and finishes with a recovery code', async () => {
+        const { secret, recoveryCodes } = await enrollTotp();
+        const b = browser();
+        clientThrough(b);
+
+        const first = await signInWithCredentials({ email: 'ana@example.com', password: PASSWORD });
+        expect(first).toMatchObject({ success: false, twoFactorRequired: true });
+
+        const state = await getTwoFactorChallenge();
+        expect(state).toEqual({ pending: true, methods: { totp: true, passkey: false, recoveryCode: true } });
+
+        const wrong = await submitTwoFactor({ code: await wrongCodeFor(secret) });
+        expect(wrong).toMatchObject({ success: false, code: 'SECOND_FACTOR_INVALID' });
+
+        const done = await submitTwoFactor({ recoveryCode: recoveryCodes[0]! });
+        expect(done.success).toBe(true);
+        expect(done.session?.user.email).toBe('ana@example.com');
+
+        const factors = await getFactors();
+        expect(factors.success).toBe(true);
+        if (factors.success) {
+            expect(factors.twoFactor).toMatchObject({ enabled: true, totp: true, passkeys: 0, recoveryCodesLeft: 9 });
+            expect(factors.recentSignIn).toBe(true);
+        }
+    });
+
+    it('reports an expired sign-in with its code', async () => {
+        clientThrough(browser());
+        expect(await getTwoFactorChallenge()).toMatchObject({ pending: false });
+        expect(await submitTwoFactor({ code: '123456' })).toMatchObject({
+            success: false,
+            code: 'SECOND_FACTOR_EXPIRED',
+        });
     });
 });

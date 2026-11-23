@@ -1808,14 +1808,23 @@ doc reaches it on its next deploy. See [`apps/otta-docs-mcp/README.md`](apps/ott
 package. These rules exist because the prose above was not enough on its own — `errorResponse(...)` was an Always-On
 Rule for months while hand-rolled JSON error responses kept shipping.
 
-| Rule                                 | What it blocks                                 | Do this instead                                                          |
-| ------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------ |
-| `no-restricted-globals` (client)     | raw `fetch()` in `apps/*/src/**`               | `useApiQuery` / `createModelHooks` / `useApiMutation` / `useApiClient()` |
-| `no-restricted-imports` (client)     | `createApiClient` outside `src/lib/api.ts`     | build the client once, pass it to `OttaQueryProvider`                    |
-| `no-restricted-syntax` (server)      | `new Response(JSON.stringify(...))`            | `errorResponse(...)` / `jsonResponse(...)` from `@ottabase/utils`        |
-| `no-restricted-syntax` (server)      | `process.env` in edge code                     | read the env binding via `getOttabaseConfig(env)`                        |
-| `ottabase/no-raw-error-log` (server) | `console.error(error)` with a raw thrown value | `redactErrorForLog(error)` from `@ottabase/utils/http-errors`            |
-| `react-hooks/rules-of-hooks`         | hooks called after an early return             | call every hook unconditionally, branch in the returned JSX              |
+| Rule                                 | What it blocks                                                        | Do this instead                                                                |
+| ------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `no-restricted-globals` (client)     | raw `fetch()` in `apps/*/src/**`                                      | `useApiQuery` / `createModelHooks` / `useApiMutation` / `useApiClient()`       |
+| `no-restricted-imports` (client)     | `createApiClient` outside `src/lib/api.ts`                            | build the client once, pass it to `OttaQueryProvider`                          |
+| `no-restricted-syntax` (server)      | `new Response(JSON.stringify(...))`                                   | `errorResponse(...)` / `jsonResponse(...)` from `@ottabase/utils`              |
+| `no-restricted-syntax` (server)      | `process.env` in edge code                                            | read the env binding via `getOttabaseConfig(env)`                              |
+| `ottabase/no-raw-error-log` (server) | `console.error(error)` with a raw thrown value                        | `redactErrorForLog(error)` from `@ottabase/utils/http-errors`                  |
+| `react-hooks/rules-of-hooks`         | hooks called after an early return                                    | call every hook unconditionally, branch in the returned JSX                    |
+| `ottabase/no-node-only-imports`      | `fs`, `child_process`, threads in edge/browser code                   | a binding through `@ottabase/cf`; Node work goes in `packages/cli`/`scripts`   |
+| `ottabase/headless-root`             | a package root reaching `react-dom` or the UI kit (one hop deep)      | export rendered UI from a subpath (`./react`)                                  |
+| `ottabase/sanitized-inner-html`      | `dangerouslySetInnerHTML` (spread or `createElement` too) unsanitized | an exported sanitizer (`sanitizeBlockHtml(...)` and friends) or `sanitized...` |
+| `ottabase/no-raw-d1`                 | any use of a D1 binding in app server code beyond a presence check    | a model method (RLS, tenant scope, casts come with it)                         |
+
+The invariants cover Ottabase Pro too (`packages/pro/*/src`, and its `app/` templates once `otta add` copies them into
+an app). Each rule has sanctioned files in `eslint.config.mjs` (Node-only entrypoints, the bootstrap that runs before
+the models' tables exist, static markup) with the reason beside them;
+`packages/scripts/src/__tests__/lint-invariants.test.ts` proves every rule fires.
 
 Rules of engagement:
 
@@ -1835,6 +1844,9 @@ Use this as the default decision tree when shipping new work.
 1. **CRUD-first via OttaORM**
     - If it is standard entity CRUD, use model + `createModelHooks()` + `/api/ottaorm/{entity}`.
     - Do not introduce custom CRUD endpoints unless there is a real non-CRUD need.
+    - A custom route is declared once with `defineEndpoint` (`@ottabase/utils/endpoint`) in `ottabase/endpoints/`,
+      served with `endpointHandler` and called with `useEndpointQuery` / `useEndpointMutation`, so both sides share its
+      path, input and response types (`ottabase/endpoints/sessions.ts` is the example).
     - Exception: Menu, MenuItem use `/api/brand/menus` (cache-invalidating CRUD), not OttaORM.
     - An admin data screen for a model is a `static admin` opt-in (CrudHub, `/admin/crudhub`), not a new page.
     - A redirect that should show a message carries a notice **code**, never text: `withNotice(url, code)` from
@@ -2371,7 +2383,7 @@ export default { queue: createQueueHandler(registry) };
 ### @ottabase/alerts
 
 Operator alerts: one `raise()` reaches email, Slack, Discord, Telegram, PagerDuty or a signed webhook, de-duplicated by
-a cooldown, capped per channel, rolled into digests, retried. Channels at Admin → Infrastructure → Alerts.
+a cooldown, capped per channel, rolled into digests, retried. Channels at Admin → Observe → Alerts.
 
 ```typescript
 import { alerts } from '../ottabase/packages/alerts'; // the app's one engine
@@ -5812,7 +5824,7 @@ Complete guide for deploying `otta-web` to Cloudflare Workers with automated CI/
 
 - Cloudflare account (free tier works)
 - GitHub repository with Actions enabled
-- Node.js 24+ and pnpm 10+ installed locally
+- Node.js 24+ and pnpm 10.27+ installed locally
 
 ## The short way: `otta deploy`
 
@@ -6831,10 +6843,10 @@ is a free package here, because a cockpit needs every app on the board to carry 
 apps is a private Premium Package.
 
 That private repository is **Ottabase Pro** (`github.com/ottabase/pro`): Tower, PayPort, Blackbox, Beacon, Workbench,
-Helpdesk and Privacy, installed with `git subtree add --prefix=packages/pro …` and `otta add pro`, with no license token
-at all because repository access is the license. It is sold as three yearly licenses split by how many people commit
-(Solo, Team, Company); a lapsed subscription loses repository access and nothing else. See
-[ottabase.com/pro](https://ottabase.com/pro).
+Helpdesk, Privacy, OG Studio, SSO, Campaigns and Lifecycle, installed with `git subtree add --prefix=packages/pro …` and
+`otta add pro`, with no license token at all because repository access is the license. It is sold as three yearly
+licenses split by how many people commit (Solo, Team, Company); a lapsed subscription loses repository access and
+nothing else. See [ottabase.com/pro](https://ottabase.com/pro).
 
 ### Design notes worth copying
 
@@ -8120,7 +8132,7 @@ Read the columns as:
 | **Backups / export**       | `@ottabase/vault` listed: nightly `vault:backup` to R2, `GET /api/vault/export/me`              | `vault.backup()` / `restore()` by hand around a risky migration                     | D1 Time Travel alone — Cloudflare's net, not a copy you hold            |
 | **Several apps**           | `@ottabase/fleet` listed on each app (its report) and a cockpit reading `GET /api/fleet/report` | `curl -H "Authorization: Bearer $FLEET_TOKEN" …/api/fleet/report` from a shell      | Opening every admin panel by hand on a Monday                           |
 | **Transactional mail**     | `@ottabase/email` templates via the app mailer                                                  | `suppressions.guard(mailer)` (`@ottabase/postmaster`) for list mail                 | Sending to a list you never checked against suppressions — avoid        |
-| **Operator alerts**        | `alerts.raise(env, alert)` (`@ottabase/alerts`); channels at Admin → Infrastructure → Alerts    | `ALERTS_EMAIL_TO` with no console; `POST /api/alerts/ingest` from CI                | Hoping someone reads `console.error`: avoid                             |
+| **Operator alerts**        | `alerts.raise(env, alert)` (`@ottabase/alerts`); channels at Admin → Observe → Alerts           | `ALERTS_EMAIL_TO` with no console; `POST /api/alerts/ingest` from CI                | Hoping someone reads `console.error`: avoid                             |
 | **Inbound mail / bounces** | `@ottabase/postmaster`: Worker `email()` → `email.inbound` on the bus, provider webhooks        | A custom `email()` export over `parseInboundEmail`                                  | Polling a mailbox — not a Workers pattern                               |
 | **Entitlements / usage**   | `@ottabase/flags` guards (402 `UPGRADE_REQUIRED`) + `@ottabase/meter` credits                   | Reading a plan column for one isolated check                                        | Plan names hard-coded in routes — avoid                                 |
 | **Customer API access**    | `@ottabase/apikeys` (`authenticate(request, env, { scopes })`)                                  | Session cookie for first-party calls                                                | One shared secret in env — avoid                                        |
@@ -8452,10 +8464,9 @@ if (!result.valid) {
 
 Keys used by the template client (`src/lib/referrals.ts`):
 
-| Key                           | Purpose                         |
-| ----------------------------- | ------------------------------- |
-| `ottabase.referral-code`      | Active referral code            |
-| `ottabase.referral-timestamp` | Stored at write time for expiry |
+| Key                 | Purpose                                                                     |
+| ------------------- | --------------------------------------------------------------------------- |
+| `ottabase.referral` | JSON `{ code, storedAt }`: the first-touch code and its write time (expiry) |
 
 Values honor `features.referrals.expiryDays`. Clearing or private browsing behaves like any other `localStorage`
 feature.
@@ -10319,8 +10330,8 @@ Working examples available at:
 
 Operator alerts for Ottabase apps. Any package (or your own code) calls `raise()` once; the alert reaches **email,
 Slack, Discord, Telegram, PagerDuty or a signed webhook**, de-duplicated by a cooldown, capped per channel, rolled into
-daily digests where you want them, and retried when a channel is down. The console at **Admin → Infrastructure →
-Alerts** manages the channels and shows every alert with where it went.
+daily digests where you want them, and retried when a channel is down. The console at **Admin → Observe → Alerts**
+manages the channels and shows every alert with where it went.
 
 Alerts are for the people running the app. Mail to your users (receipts, password resets, status-page subscribers) stays
 with `@ottabase/email` and `@ottabase/notifications`.
@@ -11455,8 +11466,9 @@ MIT
 # @ottabase/auth
 
 Lightweight, dependency-free authentication for Ottabase apps on Cloudflare Workers + D1. Signed session cookies, PBKDF2
-credentials, generic OAuth2/OIDC, and magic-link email sign-in — all built on the Web Crypto API (`crypto.subtle`) that
-Workers implements natively. No Auth.js, no Node crypto, no third-party crypto or JWT library.
+credentials, generic OAuth2/OIDC, magic-link email sign-in, passkeys and two-factor sign-in with an authenticator app,
+all built on the Web Crypto API (`crypto.subtle`) that Workers implements natively. No Auth.js, no Node crypto, no
+third-party crypto, JWT or WebAuthn library.
 
 ## Features
 
@@ -11468,6 +11480,9 @@ Workers implements natively. No Auth.js, no Node crypto, no third-party crypto o
   Auth0
 - **Magic link sign-in** - Short-lived (15 min) passwordless email links, with dev-trap / SMTP / Resend senders
   auto-selected from env vars
+- **Passkeys** - WebAuthn sign-in with the device's fingerprint, face or PIN (ES256, RS256, Ed25519)
+- **Two-factor sign-in** - Authenticator-app codes (TOTP, RFC 6238) with recovery codes, asked for after every password,
+  magic-link and OAuth sign-in; a package can make it mandatory for some people (an organization policy)
 - **UI components** - Ready-to-use login/register forms built on `@ottabase/ui`
 - **Framework-agnostic client** - Plain `fetch`-based client API and a Jotai-backed React hook
 
@@ -11512,16 +11527,27 @@ owns. Everything else stays in the host app.
 
 ### Owned by `@ottabase/auth` (via `handleAuthRequest`)
 
-| Route                            | Method | Description                                                              |
-| -------------------------------- | ------ | ------------------------------------------------------------------------ |
-| `/api/auth/csrf`                 | GET    | Sets the CSRF cookie, returns `{ csrfToken }`                            |
-| `/api/auth/session`              | GET    | Returns the current `Session` or `null`                                  |
-| `/api/auth/callback/credentials` | POST   | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }` |
-| `/api/auth/signin/:provider`     | GET    | `?callbackUrl=` → 302 redirect to the OAuth provider                     |
-| `/api/auth/callback/:provider`   | GET    | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`  |
-| `/api/auth/signin/email`         | POST   | `{ email, csrfToken, callbackUrl }` → sends a magic link                 |
-| `/api/auth/callback/email`       | GET    | Verifies the magic-link token, creates a session, redirects              |
-| `/api/auth/signout`              | POST   | `{ csrfToken }` → revokes the current session only, clears the cookie    |
+| Route                                  | Method  | Description                                                                |
+| -------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `/api/auth/csrf`                       | GET     | Sets the CSRF cookie, returns `{ csrfToken }`                              |
+| `/api/auth/session`                    | GET     | Returns the current `Session` or `null`                                    |
+| `/api/auth/callback/credentials`       | POST    | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }`   |
+| `/api/auth/signin/:provider`           | GET     | `?callbackUrl=` → 302 redirect to the OAuth provider                       |
+| `/api/auth/callback/:provider`         | GET     | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`    |
+| `/api/auth/signin/email`               | POST    | `{ email, csrfToken, callbackUrl }` → sends a magic link                   |
+| `/api/auth/callback/email`             | GET     | Verifies the magic-link token, creates a session, redirects                |
+| `/api/auth/signout`                    | POST    | `{ csrfToken }` → revokes the current session only, clears the cookie      |
+| `/api/auth/passkey/options`            | POST    | Sign-in options for a passkey (a single-use challenge)                     |
+| `/api/auth/callback/passkey`           | POST    | `{ credential, csrfToken }` → `{ success, session }`                       |
+| `/api/auth/two-factor/challenge`       | GET     | `{ pending, passkey, recoveryCodes }`: is a sign-in waiting on a code?     |
+| `/api/auth/two-factor/challenge`       | POST    | `{ code }` or `{ recoveryCode }` or `{ passkey }` → `{ success, session }` |
+| `/api/auth/two-factor/passkey-options` | POST    | Options to finish a waiting sign-in with a passkey                         |
+| `/api/auth/factors/*`                  | various | The signed-in person's authenticator app and passkeys (below)              |
+
+With an authenticator app on the account, the credentials callback answers
+`200 { success: false, twoFactorRequired: true }` and sets a pending cookie instead of the session; OAuth and magic-link
+callbacks redirect to the second-factor page (`twoFactorPage`, default `/login/two-factor`) instead of `callbackUrl`.
+See "Two-factor sign-in and passkeys".
 
 `callbackUrl` must be a relative path (`/profile`). A missing or off-site one falls back to `/`, which is also where the
 client helpers send the user when `redirectTo` is omitted.
@@ -11544,8 +11570,9 @@ These routes live in the app and call `hashPassword` / `verifyPassword` / `getSe
 
 Register signs the new account in itself when no email verification is required: it checks the CSRF token with
 `requireCsrf(request, env, body.csrfToken)` and finishes with `completeSignIn(user, env, request, options)`, the same
-tail the credentials callback runs (first-user bootstrap, `onSignIn`, the session cookie). `completeSignIn` returns
-`{ cookie, session }`, or null when the account could not be finished; answer 500 and set no cookie then.
+tail the credentials callback runs (first-user bootstrap, `onSignIn`, the session cookie stamped with `authAt` = now).
+`completeSignIn` returns `{ cookie, session }`, or null when the account could not be finished; answer 500 and set no
+cookie then. Its optional fifth argument names the sign-in (`{ signInMethod: 'register' }`), stored on the session.
 
 ```typescript
 import { completeSignIn, requireCsrf } from '@ottabase/auth/backend';
@@ -11553,7 +11580,9 @@ import { completeSignIn, requireCsrf } from '@ottabase/auth/backend';
 const rejected = await requireCsrf(request, env, body.csrfToken);
 if (rejected) return rejected;
 // ... create the user ...
-const signedIn = await completeSignIn({ id, email, name, image: null, emailVerified: null }, env, request, options);
+const signedIn = await completeSignIn({ id, email, name, image: null, emailVerified: null }, env, request, options, {
+    signInMethod: 'register',
+});
 if (!signedIn) return errorResponse('Account created, but signing in failed', 500);
 return jsonResponse({ success: true, session: signedIn.session }, 200, { headers: { 'Set-Cookie': signedIn.cookie } });
 ```
@@ -11601,15 +11630,21 @@ const options: CreateAuthConfigOptions = {
 };
 ```
 
+A session lasts weeks, so sign-ins say little about who still uses the app. `onSession({ userId, email })` is called
+when `GET /session` (the request every page load makes) finds a signed-in user. It is awaited, so keep it cheap and
+throttle it; a throw is swallowed and never fails the session read. otta-web uses it to emit
+`user.seen { userId, email }` on its bus at most once an hour per account per isolate.
+
 ## Account events
 
 The handler announces the accounts it creates and verifies through `emit`, which the app wires to its event bus (the
 package never imports one). A throw from `emit` is logged and never fails the sign-in.
 
-| Event           | Payload (`UserCreatedEvent`, `UserVerifiedEvent`)            | When                                                                                                                              |
-| --------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `user.created`  | `{ userId, email, name, organizationId: null, method, at }`  | An OAuth first sign-in (`method: 'oauth'`, after the identity link) or a magic link that creates the account (`'magic-link'`)     |
-| `user.verified` | `{ userId, email, at }` (`at` is the stored `emailVerified`) | `emailVerified` goes from null to a time: an account created verified, a magic link, an OAuth provider that vouches for the email |
+| Event                 | Payload (`UserCreatedEvent`, `UserVerifiedEvent`)            | When                                                                                                                              |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `user.created`        | `{ userId, email, name, organizationId: null, method, at }`  | An OAuth first sign-in (`method: 'oauth'`, after the identity link) or a magic link that creates the account (`'magic-link'`)     |
+| `user.verified`       | `{ userId, email, at }` (`at` is the stored `emailVerified`) | `emailVerified` goes from null to a time: an account created verified, a magic link, an OAuth provider that vouches for the email |
+| `user.factor.changed` | `{ userId, factor, change, at }` (`UserFactorChangedEvent`)  | An authenticator app or passkey added or removed, recovery codes regenerated or one used: for an audit trail or a security email  |
 
 `organizationId` is null because the workspace comes later, from `onSignIn`. Accounts the host app creates itself
 (credentials sign-up, a bootstrap owner, Pro SSO) and its own verify-email route emit the same events from the app, with
@@ -11632,25 +11667,156 @@ export function authOptions(env: CloudflareEnv): CreateAuthConfigOptions {
 otta-web wires it in `getAuthOptions` (`worker/lib/auth-utils.ts`) through `emitAccountEvent`, which also sets the
 event's actor and swallows a bus failure.
 
+## Two-factor sign-in and passkeys
+
+Both live in one table, `authenticators` (core, from `@ottabase/ottaorm`: list `authenticatorsTable` with the core
+tables and `Authenticator` with the core models). Generic CRUD never serves it.
+
+**Two-factor is on** when the person has a confirmed authenticator app OR at least one passkey
+(`Authenticator.hasTwoFactor`, `withTwoFactor` for a roster). A policy is satisfied by either.
+
+**One gate.** Password, magic-link and OAuth sign-ins all end in `signInOrChallenge` (`src/sign-in.ts`). An account with
+two-factor on gets a 10-minute pending cookie (`ottabase.<APP_ID>.second-factor`, `Path=/api/auth`) instead of a
+session: the password callback answers 200 `{ twoFactorRequired: true, code: 'SECOND_FACTOR_REQUIRED' }`, OAuth and
+magic links redirect to `/login/two-factor`. `POST /two-factor/challenge` issues the session once a code (if the app is
+on), one of the person's passkeys (if any) or a recovery code checks out; `GET /two-factor/challenge` says which
+(`{ pending, methods: { totp, passkey, recoveryCode } }`). A passkey sign-in with user verification is two factors
+already and never gets the challenge. Sessions minted outside a sign-in (the password-change reissue, SSO through an
+identity provider, which owns its MFA) are not challenged.
+
+**Sign-in time and method.** Every session a sign-in issues carries `authAt` (when the person proved who they are) and
+`signInMethod` (`password`, `magic-link`, `oauth:<provider>`, `passkey`, `register`, `owner`, `sso:<connectionId>`...),
+both immutable. A host minting a session itself passes them to `createSessionCookieForUser` (`authAt: Date.now()` for a
+sign-in; the old session's values, from `readSessionIdentity`, for a reissue). Without `authAt` a session is never a
+recent sign-in.
+
+**Authenticator app (TOTP).** RFC 6238, SHA-1, six digits, 30 seconds, one step of drift either way, one app per person.
+The secret is sealed with AES-GCM under `AUTH_FACTOR_KEY` (else `AUTH_SECRET`); each accepted step is stored, so a code
+works once. If the key changes, the app cannot be read: the challenge answers 409 `AUTHENTICATOR_UNREADABLE` (not
+counted as a guess) and the person uses a recovery code or a passkey, then sets the app up again.
+
+**Recovery codes.** Ten, `xxxx-xxxx-xxxx-xxxx` (80 bits each), handed out when two-factor first turns on: the TOTP
+confirm or the first passkey answers with `recoveryCodes`. Shown once, stored as SHA-256 hashes in
+`verification_tokens`, single-use, regenerable, deleted when the last factor goes. A recovery code spent on a sign-in
+that then fails (the app's `onSignIn` threw) is put back.
+
+**Attempt limits.** Every code and recovery code is counted BEFORE it is checked, as a row in `verification_tokens`
+inserted then counted (`VerificationToken.recordAttempts`), so parallel guesses cannot all slip under the limit: more
+than five against one pending sign-in, or more than thirty against the account in an hour, answers 429
+`TOO_MANY_ATTEMPTS` unchecked. Success clears both. A passkey is never counted or blocked, so a person locked out of
+codes can still finish with one. The TOTP setup confirm counts against the account limit too.
+
+**A session confined until two-factor is on is not signed out.** Off `/api/auth/*` and `/api/users/me` (where the person
+can switch to another organization) it gets 401s; otta-web marks those `X-Session-Ended: two-factor-setup` (from
+`sessionRefusal`, else `isTwoFactorSetupPending`) so its API client keeps the session and the app stays on `/security`
+instead of sending the person to the login page.
+
+**Passkeys.** WebAuthn with attestation `none`: ES256, RS256 and Ed25519 keys kept as JWKs, user verification required
+at registration and sign-in, discoverable credentials, a signature counter that only moves forward (also between two
+racing assertions). At the challenge, a passkey of anyone else is refused before its counter is touched. The relying
+party is the host of `AUTH_URL` and the origin its origin, never the request's. Browsers refuse an IP address as a
+relying party, so passkeys need the app at a domain over https, or at `localhost` in development
+(`AUTH_URL=http://localhost:3003`, not `127.0.0.1`); `passkeysAvailable(env)` says which, and the login config carries
+it.
+
+**Changing factors needs a recent sign-in.** Every write under `/factors` requires `authAt` under 15 minutes old
+(`RECENT_SIGN_IN_MS`), else `403 REAUTH_REQUIRED`: a stolen cookie cannot add its own passkey or remove the app, and a
+password change does not reopen the window. `requireRecentSignIn(request, env, options)` gives a host route the same
+check (null, or the 401/403 to send). Removing the last factor while the active organization's policy applies is 409
+`TWO_FACTOR_REQUIRED`.
+
+| Route                                | Method        | Body / answer                                                                                                                                                   |
+| ------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/auth/factors`                  | GET           | `{ twoFactor: { enabled, totp, totpPending, passkeys, recoveryCodesLeft, requiredFrom }, passkeys: [...], passkeysAvailable, recentSignIn, recentSignInUntil }` |
+| `/api/auth/factors/totp`             | POST          | `{ secret, uri }` (show `uri` as a QR code)                                                                                                                     |
+| `/api/auth/factors/totp/confirm`     | POST          | `{ code }` to `{ success, recoveryCodes? }` (codes only when two-factor just turned on)                                                                         |
+| `/api/auth/factors/totp`             | DELETE        | removes the app; the recovery codes go too when it was the last factor                                                                                          |
+| `/api/auth/factors/recovery-codes`   | POST          | a fresh `{ success, recoveryCodes }`                                                                                                                            |
+| `/api/auth/factors/passkeys/options` | POST          | creation options for `navigator.credentials.create`                                                                                                             |
+| `/api/auth/factors/passkeys`         | POST          | `{ credential, name }` to `{ success, passkey, recoveryCodes? }`                                                                                                |
+| `/api/auth/factors/passkeys/:id`     | PATCH, DELETE | `{ name }` / remove (the caller's own only)                                                                                                                     |
+
+Every failure is an `errorResponse` with a stable `code`:
+
+| Code                          | Status  | When                                                                                   |
+| ----------------------------- | ------- | -------------------------------------------------------------------------------------- |
+| `SECOND_FACTOR_EXPIRED`       | 401     | no pending sign-in (challenge, its passkey options)                                    |
+| `SECOND_FACTOR_INVALID`       | 401     | a wrong code or recovery code, at the challenge or the setup confirm                   |
+| `TOO_MANY_ATTEMPTS`           | 429     | over an attempt limit                                                                  |
+| `AUTHENTICATOR_UNREADABLE`    | 409     | the app's secret cannot be opened (the sealing key changed)                            |
+| `REAUTH_REQUIRED`             | 403     | a factor change without a recent sign-in                                               |
+| `TWO_FACTOR_REQUIRED`         | 409     | removing the last factor while a policy applies                                        |
+| `PASSKEYS_UNAVAILABLE`        | 400     | the app's address cannot have passkeys                                                 |
+| `PASSKEY_REFUSED`             | 401/400 | a passkey that does not check out (sign-in, challenge) / cannot be added               |
+| `PASSKEY_EXISTS`              | 409     | that passkey is already added                                                          |
+| `ALREADY_ENABLED`             | 409     | an authenticator app is already set up                                                 |
+| `NO_PENDING_SETUP`            | 409     | confirm without a started setup                                                        |
+| `NOT_ENABLED`                 | 409     | recovery codes asked for while two-factor is off                                       |
+| `NOT_FOUND`                   | 404     | no such passkey (of the caller's), no app to remove, no passkey on the pending account |
+| `VALIDATION_ERROR`            | 400     | a missing name or proof                                                                |
+| `UNAUTHORIZED`                | 401     | no session                                                                             |
+| `EMAIL_UNVERIFIED`            | 401     | `requireVerifiedEmail` and the email is not verified                                   |
+| `ACCOUNT_PROVISIONING_FAILED` | 500     | the account could not be finished (opaque message, stable code)                        |
+
+The browser side is in `@ottabase/auth/client`: `signInWithPasskey`, `getTwoFactorChallenge`, `submitTwoFactor`,
+`getFactors`, `startTotpSetup`, `confirmTotpSetup`, `disableTotp`, `regenerateRecoveryCodes`, `addPasskey`,
+`renamePasskey`, `removePasskey`, `isPasskeySupported`. otta-web's pages are `/login/two-factor` and `/security`. Every
+call resolves, never throws: a failure is `{ success: false, error, code }`, and no response at all is
+`code: 'NETWORK_ERROR'` (for `getTwoFactorChallenge`, an `error` beside `pending: false`, so a page can tell "offline"
+from "expired"). A passkey ceremony the person closed comes back as `{ cancelled: true }` with nothing to show; a
+refusal by the browser, a timeout, or `InvalidStateError` on create (the device already has a passkey here) comes back
+with an `error` (`isPasskeyCancelled` holds the rule). `addPasskey()` names the passkey for the browser and device
+(`defaultPasskeyName()`, for example "Safari on iPhone") unless given a name, and returns `recoveryCodes` when that
+first passkey turned two-factor on.
+
+In React, `useFactors()` from `@ottabase/auth/react` reads `GET /factors` on mount and returns
+`{ data, error, pending, reload }`; call `reload()` after each change.
+
+```typescript
+import { signInWithCredentials } from '@ottabase/auth/client';
+
+const result = await signInWithCredentials({ email, password });
+if (result.twoFactorRequired) navigate({ to: '/login/two-factor', search: { callbackUrl: '/dashboard' } });
+```
+
+**Resetting it for someone else.** `resetTwoFactor(userId, env, options)` from `@ottabase/auth/backend` removes ALL of a
+person's factors (authenticator app, passkeys, recovery codes), refreshes their sessions and announces
+`user.factor.changed { factor: 'all', change: 'removed' }`, for an administrator helping a member who lost their device.
+It checks nothing: the caller decides who may do it, and should hold its own request to `requireRecentSignIn`.
+
+**Requiring it.** `secondFactorRequiredFrom(env, { userId, organizationId, signInMethod })` returns the time from which
+a person must have two-factor on while working in `organizationId`, the session's ACTIVE organization (or null), so a
+policy of one organization never confines someone working in another. It is read when the session snapshot is built.
+When the answer changes for one person, bump their profile version (`bumpProfileVersion`); when it changes for a whole
+organization, call `bumpOrganizationVersion(organizationId, env)` once, and every live session in it re-reads its
+snapshot on its next request. Once the time passes, `getSession` returns null for that session everywhere except
+`/api/auth/*` and `/api/users/me`, and the session read carries `twoFactorSetupRequired: true` so the app shows its
+setup page. A throw fails the sign-in closed; a failed refresh keeps the previous snapshot. Apps built on Ottabase wire
+it from the package registry (`auth.secondFactorRequiredFrom` on a manifest), so an organization policy package needs no
+auth code.
+
 ## Session Model
 
 The session cookie (`ottabase.<APP_ID>.session-token` by default, `ottabase.session-token` without `APP_ID`, overridable
-via `AUTH_COOKIE_NAME`) is a signed, self-contained JWT carrying only **identity** claims — `sub`, `jti`, `email`,
-`name`, `image`, `emailVerified`, `organizationId`, `createdAt`, `cms` (creation time in ms), `profileVersion`, `iat`,
-`exp`. The potentially large / frequently-changing **authorization snapshot** (`roles`, `permissions`) is deliberately
-kept **out of the cookie** and stored in the per-session KV registry record instead, so the cookie can never approach
-the ~4KB browser limit no matter how many permissions a user has, and revoked roles don't linger in a signed token for
-the session's whole lifetime. `getSession()` merges the identity claims with the snapshot into the returned `user`.
+via `AUTH_COOKIE_NAME`) is a signed, self-contained JWT carrying only **identity** claims: `sub`, `jti`, `email`,
+`name`, `image`, `emailVerified`, `organizationId`, `createdAt`, `cms` (creation time in ms), `authAt` (last real
+sign-in in ms, absent for a session minted without one), `signInMethod`, `profileVersion`, `iat`, `exp`. The potentially
+large / frequently-changing **authorization snapshot** (`roles`, `permissions`) is deliberately kept **out of the
+cookie** and stored in the per-session KV registry record instead, so the cookie can never approach the ~4KB browser
+limit no matter how many permissions a user has, and revoked roles don't linger in a signed token for the session's
+whole lifetime. `getSession()` merges the identity claims with the snapshot into the returned `user`.
 
 In production the cookie is `Secure` and uses the `__Host-` name prefix (pinned to the host, `Path=/`, no `Domain`) so
 it can't be tossed/shadowed by a sibling subdomain; in an explicit dev environment over plain HTTP the prefix and
 `Secure` are dropped so local development still works.
 
 Verifying a request is the JWT signature/expiry check plus **one parallel batch of KV reads** (bulk-revocation marker,
-per-session sign-out tombstone, registry snapshot, and the profile-version counter). There's no database read on the hot
-path unless a profile-version bump flags the snapshot stale (refreshed once from D1, then the registry record is
-rewritten so later requests skip the read) or a freshly-issued session's registry record hasn't propagated yet (see the
-grace window below).
+per-session sign-out tombstone, registry snapshot, the profile-version counter, and the version counter of the
+organization the session was issued in; a session that has switched organization since reads its current one's with one
+more KV read). There's no database read on the hot path unless a profile-version or organization-version bump flags the
+snapshot stale (refreshed once from D1, then the registry record is rewritten so later requests skip the read) or a
+freshly-issued session's registry record hasn't propagated yet (see the grace window below; without D1 such a session is
+refused, since there is no snapshot to judge it by).
 
 **`OBCF_KV` is required.** Session verification consults KV on every request and fails _closed_: if `OBCF_KV` isn't
 bound, or a KV read errors, `getSession` returns `null` rather than trusting an unverifiable token. Deploying without
@@ -11713,7 +11879,7 @@ import {
     revokeUserSessionById,
 } from '@ottabase/auth/backend';
 
-const me = await readSessionIdentity(request, env); // { userId, jti } from the cookie, no KV read
+const me = await readSessionIdentity(request, env); // { userId, jti, createdMs, authAt, signInMethod }, no KV read
 const sessions = await listUserSessions(me.userId, env, me.jti); // newest first, `current` marked
 await renameUserSession(me.userId, sessions[0].id, 'Work laptop', env);
 await revokeUserSessionById(me.userId, sessions[1].id, env);
@@ -11732,7 +11898,9 @@ what an erasure needs, since a "revoked since" marker alone leaves the records u
 
 `wasSessionRevoked(request, env)` answers why a request with a validly signed cookie failed: true when its jti was
 tombstoned (revoked from another session) or it predates a "revoked since" marker (password change). Call it only on a
-request that already failed authentication; it costs two KV reads.
+request that already failed authentication; it costs two KV reads. Cheaper first: `sessionRefusal(request)` returns what
+`getSession` already concluded about that same `Request` object (`'revoked'`, `'two-factor-setup'`, null for no reason
+worth telling, `undefined` when `getSession` never saw it), so a 401 handler probes only on `undefined`.
 
 ### Locale and timezone defaults for new accounts
 
@@ -12052,6 +12220,10 @@ const config = getLoginConfig(process.env);
 Individual pieces are also exported: `CredentialsForm`, `MagicLinkForm`, `RegisterForm`, `SocialLoginButtons` +
 `SocialLoginDivider`.
 
+`showPasskey` with `onPasskeyLogin` puts "Sign in with a passkey" first in the card, above the "or" divider. The
+callback gets the form's "Remember me" choice (`{ rememberMe }`), which `LoginForm` holds for both. Pass `showPasskey`
+once the login config is known (`passkeys` in `LoginConfig`) and `isPasskeySupported()` is true, so nothing shifts.
+
 `LoginForm`, `CredentialsForm`, `MagicLinkForm` and `RegisterForm` take a `botCheck` node rendered inside the form,
 above the submit button. `LoginForm` hands its one node to whichever method is showing, so one widget covers password
 and magic link:
@@ -12072,24 +12244,25 @@ const human = useTurnstile('signin'); // from @ottabase/ui/turnstile
 
 ## Environment Variables
 
-| Variable                                                | Required                                      | Purpose                                                                                               |
-| ------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`                                           | Yes (fails closed without it)                 | HMAC secret (>= 16 chars, 32+ recommended) for session JWTs, CSRF tokens, OAuth state/PKCE cookies    |
-| `AUTH_ALLOW_INSECURE_DEV_SECRET`                        | No (local dev only)                           | `"true"` permits the built-in insecure dev secret — only honored when `ENVIRONMENT` is a dev value    |
-| `CORS_ALLOWED_ORIGINS`                                  | No                                            | Comma-separated extra origins allowed for credentialed CORS (same-origin + `AUTH_URL` always allowed) |
-| `AUTH_URL`                                              | No                                            | Frontend origin used for redirects + OAuth `redirect_uri` (defaults to `http://127.0.0.1:3003`)       |
-| `AUTH_COOKIE_NAME`                                      | No                                            | Overrides the session cookie name (default `ottabase.<APP_ID>.session-token`)                         |
-| `AUTH_DISABLE_CREDENTIALS`                              | No                                            | `"true"`/`"1"` disables `POST /api/auth/callback/credentials`                                         |
-| `AUTH_REQUIRE_EMAIL_VERIFIED`                           | No                                            | `"true"`/`"1"` rejects credentials sign-in for unverified users                                       |
-| `AUTH_SESSION_MAX_AGE`                                  | No                                            | Session lifetime in seconds (default 30 days)                                                         |
-| `GOOGLE_CLIENT_ID` / `_SECRET`                          | For Google OAuth                              |                                                                                                       |
-| `GITHUB_CLIENT_ID` / `_SECRET`                          | For GitHub OAuth                              |                                                                                                       |
-| `DISCORD_CLIENT_ID` / `_SECRET`                         | For Discord OAuth                             |                                                                                                       |
-| `AZURE_AD_CLIENT_ID` / `_SECRET` / `AZURE_AD_TENANT_ID` | For Azure AD OAuth                            |                                                                                                       |
-| `AUTH0_CLIENT_ID` / `_SECRET` / `AUTH0_ISSUER`          | For Auth0 OAuth                               |                                                                                                       |
-| `EMAIL_RESEND_API_KEY`                                  | For Resend magic links                        |                                                                                                       |
-| `EMAIL_SERVER` / `EMAIL_FROM`                           | For SMTP magic links                          |                                                                                                       |
-| `DEV_EMAIL_TRAP_ENABLED`                                | For local dev email capture (needs `OBCF_KV`) |                                                                                                       |
+| Variable                                                | Required                                      | Purpose                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`                                           | Yes (fails closed without it)                 | HMAC secret (>= 16 chars, 32+ recommended) for session JWTs, CSRF tokens, OAuth state/PKCE cookies                                                                                                                                                        |
+| `AUTH_FACTOR_KEY`                                       | No (defaults to `AUTH_SECRET`)                | Key authenticator-app secrets are sealed under. Rotating it (or `AUTH_SECRET` while this is unset) makes every enrolled app unreadable: those people answer `AUTHENTICATOR_UNREADABLE`, sign in with a recovery code or passkey, and set the app up again |
+| `AUTH_ALLOW_INSECURE_DEV_SECRET`                        | No (local dev only)                           | `"true"` permits the built-in insecure dev secret, only honored when `ENVIRONMENT` is a dev value                                                                                                                                                         |
+| `CORS_ALLOWED_ORIGINS`                                  | No                                            | Comma-separated extra origins allowed for credentialed CORS (same-origin + `AUTH_URL` always allowed)                                                                                                                                                     |
+| `AUTH_URL`                                              | No                                            | Frontend origin used for redirects + OAuth `redirect_uri` (defaults to `http://127.0.0.1:3003`)                                                                                                                                                           |
+| `AUTH_COOKIE_NAME`                                      | No                                            | Overrides the session cookie name (default `ottabase.<APP_ID>.session-token`)                                                                                                                                                                             |
+| `AUTH_DISABLE_CREDENTIALS`                              | No                                            | `"true"`/`"1"` disables `POST /api/auth/callback/credentials`                                                                                                                                                                                             |
+| `AUTH_REQUIRE_EMAIL_VERIFIED`                           | No                                            | `"true"`/`"1"` rejects credentials sign-in for unverified users                                                                                                                                                                                           |
+| `AUTH_SESSION_MAX_AGE`                                  | No                                            | Session lifetime in seconds (default 30 days)                                                                                                                                                                                                             |
+| `GOOGLE_CLIENT_ID` / `_SECRET`                          | For Google OAuth                              |                                                                                                                                                                                                                                                           |
+| `GITHUB_CLIENT_ID` / `_SECRET`                          | For GitHub OAuth                              |                                                                                                                                                                                                                                                           |
+| `DISCORD_CLIENT_ID` / `_SECRET`                         | For Discord OAuth                             |                                                                                                                                                                                                                                                           |
+| `AZURE_AD_CLIENT_ID` / `_SECRET` / `AZURE_AD_TENANT_ID` | For Azure AD OAuth                            |                                                                                                                                                                                                                                                           |
+| `AUTH0_CLIENT_ID` / `_SECRET` / `AUTH0_ISSUER`          | For Auth0 OAuth                               |                                                                                                                                                                                                                                                           |
+| `EMAIL_RESEND_API_KEY`                                  | For Resend magic links                        |                                                                                                                                                                                                                                                           |
+| `EMAIL_SERVER` / `EMAIL_FROM`                           | For SMTP magic links                          |                                                                                                                                                                                                                                                           |
+| `DEV_EMAIL_TRAP_ENABLED`                                | For local dev email capture (needs `OBCF_KV`) |                                                                                                                                                                                                                                                           |
 
 `AUTH_SECRET` resolution **fails closed**: it is required unless **both** `ENVIRONMENT` is an explicit dev value
 (`development`/`dev`/`test`/`local`) **and** `AUTH_ALLOW_INSECURE_DEV_SECRET=true` are set, in which case a built-in
@@ -14137,9 +14310,11 @@ A package opts in with an `ottabase` field in its package.json:
 
 A package with a user interface can say more, and `otta add` writes that too:
 
-- `adminPages`: entries for the client descriptor (path, title, icon, group, page module, export).
+- `adminPages`: entries for the client descriptor (path, title, icon, group, page module, export). otta-web's groups are
+  `customers`, `observe`, `content`, `growth`, `infrastructure`, `access`, `security` and `appearance`.
 - An `app/` folder mirroring the app layout (`app/ottabase/packages/<key>.ts`, `app/src/pages/…`): copied in where the
-  app has no such file yet. A shipped composition wins over the reference app's.
+  app has no such file yet. A shipped composition wins over the reference app's. The copies are yours to edit; see
+  "Later releases" below for how a new template reaches an edited copy.
 - `routes`: the package's other SPA pages, written into the client descriptor next to `adminPages`; the app router
   mounts them from there.
   `{ "path": "/status", "page": "status/StatusPage", "export": "StatusPage", "access": "public" }` (`access` defaults to
@@ -14150,6 +14325,26 @@ A package with a user interface can say more, and `otta add` writes that too:
 - `notices`: `{ "checkout-complete": { "type": "success", "message": "You're in.", "inline": true } }` adds the URL
   notices the package redirects with to its client descriptor; the app registry names them `<key>.<code>`. Codes are
   kebab-case; `type` is success, info, warning or error.
+
+#### Later releases
+
+Run `otta add` again after pulling a newer package (`otta pro update` does): it adds what the release adds and keeps
+your edits.
+
+- **Copied templates.** `apps/<app>/.ottabase-templates.json` records the template each `app/` file was copied from
+  (commit it). Template unchanged: nothing happens. Your copy unchanged: it becomes the new template (`update`). Both
+  changed: the template's changes are merged into your edits with `git merge-file` (`merge`); where both changed the
+  same lines, the file gets conflict markers (`<<<<<<< yours`) and the plan says `conflict`. A copy made before the
+  record existed is recorded when it still equals the template and left alone (with a note) when it does not; recording
+  it alone still reports "already wired". When git is missing or cannot merge (a binary file), the copy and its record
+  stay as they were and the plan says why. A template the package no longer ships is deleted where your copy is
+  unchanged (`delete`), flagged "removed upstream: review it" where you edited it, and dropped from the record either
+  way; the composition (`ottabase/packages/<key>.ts`) is never deleted, the package list imports it.
+- **New pages, routes and notices** a release declares are inserted into the package's own client entry (another package
+  listing the same path does not count); an entry edited by hand out of shape is left alone and the plan names what to
+  add.
+- **New tables** join the package's existing re-export line in `ottabase/db/schema.ts` (its line ending kept). An export
+  spread over several lines is left alone and the plan names only the tables it lacks.
 
 A boundary that already has an `onError` is left alone and the plan says what to do by hand. Two packages routing one
 path, or a package routing a path the app owns, stop the app at boot with both names. `page` is a module path under
@@ -14242,10 +14437,11 @@ pnpm otta pro update --dry-run
 ```
 
 Pro lives at `packages/pro` as a git subtree. The command runs `git subtree pull --squash` for the tag (the tree must be
-clean), `otta add pro <app>` for anything the release adds (never overwriting what the app has), and prints the
-release's `CHANGELOG.md` entry, with a warning when it names a newer public Ottabase than this repository may have. Then
-`pnpm install && pnpm build:pkg`, the gates, the migrations in each environment, and a commit. In a repo that keeps
-`.ottabase-upstream.json` (the `ottabase-update` skill's record) the command also sets `pro` there to the pulled tag.
+clean), `otta add pro <app>` for anything the release adds (new templates merged into your edits, see "Later releases"),
+and prints the release's `CHANGELOG.md` entry, with a warning when it names a newer public Ottabase than this repository
+may have. Then `pnpm install && pnpm build:pkg`, the gates, the migrations in each environment, and a commit. In a repo
+that keeps `.ottabase-upstream.json` (the `ottabase-update` skill's record) the command also sets `pro` there to the
+pulled tag.
 
 ### Starting apps and environments
 
@@ -15837,7 +16033,8 @@ The package splits along a UI boundary so the `.` barrel pulls in zero rendered 
 - `@ottabase/docs` — pure, tree-shakeable helpers and types: `buildPageSlug`, `extractTitle`, `extractToc`,
   `fileNameToSlug`, `findPageBySlug`, `organizePages`, `slugToTitle`, the `useDocs` hook, and all type re-exports.
 - `@ottabase/docs/react` — rendered components: `DocsLayout`, `DocsSidebar`, `MarkdownRenderer`, `TableOfContents` (this
-  is the only entry that value-imports `@ottabase/ui-code-highlight`, an optional peer).
+  is the only entry that value-imports `@ottabase/ui-code-highlight` and `@ottabase/ui`, optional peers needed only
+  here).
 
 ## Quick Start
 
@@ -15981,6 +16178,17 @@ import { sendTemplatedEmail } from '@ottabase/email/mailer';
 
 const mailer = createResendMailer({ apiKey: env.EMAIL_RESEND_API_KEY });
 ```
+
+### Addresses and tags
+
+The Resend, SES and SMTP mailers build every address through one `formatAddress`: `{ email, name }` becomes
+`Name <email>`, and a name holding a comma, `<`, `@` or another RFC 5322 special is quoted, so `Acme, Inc.` stays one
+recipient and a name cannot add one. Line breaks and control characters never reach a header. The `email` half must be
+exactly one mailbox: anything else (`a@b.com>, evil@c.com`) fails the send with `{ success: false }` instead of being
+sent. A plain string address is passed through with its line breaks removed.
+
+`tags` are plain strings. Resend needs a name and a value, both limited to letters, digits, `_` and `-`: a tag `kind:id`
+is sent as name `kind`, value `id`; a bare tag as a flag (`value: "true"`); any other character becomes `-`.
 
 ### App-level Templates
 
@@ -16727,27 +16935,27 @@ const config = defineModelConfig({
 
 ## Field Types
 
-| Field Type    | Renders As                      |
-| ------------- | ------------------------------- |
-| `input`       | Text input                      |
-| `textarea`    | Multi-line textarea             |
-| `number`      | Number input with min/max/step  |
-| `email`       | Email input                     |
-| `password`    | Password with show/hide + hints |
-| `url`         | URL input                       |
-| `tel`         | Phone input                     |
-| `date`        | Date picker                     |
-| `datetime`    | DateTime picker                 |
-| `time`        | Time picker                     |
-| `boolean`     | Checkbox                        |
-| `select`      | OttaSelect (single)             |
-| `multiselect` | OttaSelect (multiple)           |
-| `file`        | File upload with drag/drop      |
-| `image`       | Image upload with preview       |
-| `json`        | JSON editor (edit + tree view)  |
-| `editor`      | JSON editor (EditorJS format)   |
-| `hidden`      | Hidden input                    |
-| `readonly`    | Read-only display               |
+| Field Type    | Renders As                     |
+| ------------- | ------------------------------ |
+| `input`       | Text input                     |
+| `textarea`    | Multi-line textarea            |
+| `number`      | ui NumberInput (min/max/step)  |
+| `email`       | Email input                    |
+| `password`    | ui PasswordInput (+ checklist) |
+| `url`         | URL input                      |
+| `tel`         | Phone input                    |
+| `date`        | Date picker                    |
+| `datetime`    | DateTime picker                |
+| `time`        | Time picker                    |
+| `boolean`     | Checkbox                       |
+| `select`      | OttaSelect (single)            |
+| `multiselect` | OttaSelect (multiple)          |
+| `file`        | ui FileInput + upload          |
+| `image`       | ui FileInput + upload, preview |
+| `json`        | JSON editor (edit + tree view) |
+| `editor`      | JSON editor (EditorJS format)  |
+| `hidden`      | Hidden input                   |
+| `readonly`    | Read-only display              |
 
 ## Accessibility, SSR & performance
 
@@ -17140,10 +17348,19 @@ export const notesPackage = definePackage<CloudflareEnv>({
 | `health`          | Probed by `/api/health`                                                            |
 | `lifecycle`       | `onInstall` / `onUpgrade` run from the init route, versions recorded in KV         |
 | `errors`          | `report(incident)` receives every unhandled error the host hands to the registry   |
+| `auth`            | `secondFactorRequiredFrom(env, input)`: when this person must have two-factor on   |
 
 `registry.report(incident)` fans an incident out to every `errors` reporter and never rejects. A request boundary passes
 `waitUntil` and does not wait; a scheduled task or queue batch has no `waitUntil` and must `await` it, or the reports
 die with the handler.
+
+`registry.secondFactorRequiredFrom(env, { userId, organizationId, signInMethod })` asks every `auth` contributor and
+returns the earliest date, or null. `organizationId` is the session's ACTIVE organization, so one organization's policy
+never confines someone working in another; `signInMethod` is how the session signed in (`password`, `oauth:google`,
+`sso:<connectionId>`...). The host passes it to `@ottabase/auth` as `secondFactorRequiredFrom`; a contributor that
+throws makes the call throw, so the sign-in fails closed rather than skipping a policy. When a rule changes for a whole
+organization, call `bumpOrganizationVersion(organizationId, env)` from `@ottabase/auth/backend` once: every live session
+in that organization re-reads its snapshot on its next request.
 
 Cron handler names and queue job types are app-wide. Namespace them (`notes:purge`); the registry throws on a clash.
 
@@ -17253,7 +17470,10 @@ export const notesClient = definePackageClient({
 });
 ```
 
-`adminPages` join the admin nav. `routes` are the package's other pages: `access` is `protected` (a signed-in page, the
+`adminPages` join the admin nav under their `group`. otta-web's groups, in sidebar order: `customers` (billing, support,
+privacy requests), `observe` (readiness, alerts, monitoring), `content`, `growth`, `infrastructure`, `access`,
+`security`, `appearance`; an empty group is not shown. A group the app's nav does not have is logged and the page is
+listed under Infrastructure. `routes` are the package's other pages: `access` is `protected` (a signed-in page, the
 default) or `public`, and `menu` puts a link in the signed-in account menu. `notices` declares the URL notices the
 package may redirect with (`{ 'checkout-complete': { type: 'success', message: 'Paid.' } }`); `packageNotices(clients)`
 namespaces them as `payport.checkout-complete` for the app's registry, and a server builds the link with
@@ -18712,6 +18932,9 @@ Without Browser Rendering the routes answer 503 and the health line says so. Wit
 The signature is HMAC-SHA256 of the card's canonical query string under the secret. 400 for a bad card, 503 when
 rendering is not configured, 502 when the browser failed.
 
+The preview is served on the app's own origin and its template may come from an editor (OG Studio), so it answers with
+`content-security-policy: sandbox allow-same-origin`: no script in it runs, while its own fonts and images still load.
+
 ## Your own template
 
 ```ts
@@ -19010,6 +19233,9 @@ const ai = createAiProvisioningWithStorage({
         // survives a request but not isolate churn — an attacker rotating connections gets a
         // fresh budget on each. Back it with KV in production.
         verifyLimiter: createKvVerifyLimiter(env.OBCF_KV),
+        // When your tasks require `json`: "Test key" asks for a small JSON object, so a model
+        // that cannot answer in JSON fails on the form (`INVALID_RESPONSE`), not on every call.
+        verifyJson: true,
     },
 });
 ```
@@ -21062,6 +21288,9 @@ import { createFuzzySelection } from '@ottabase/ottadate/fuzzy';
 // Type-to-parse (no DOM): "early 90s" / "summer 98" → FuzzyDateTime
 import { parseFuzzyInput } from '@ottabase/ottadate/parse';
 
+// Controlled React components (React is an optional peer) — see "React" below
+import { DatePicker, DateRangePicker, DateTimePicker, FuzzyDateTimePicker } from '@ottabase/ottadate/react';
+
 // Stylesheet
 import '@ottabase/ottadate/styles.css';
 ```
@@ -21094,35 +21323,59 @@ Override any variable on `.ottadate` or a parent element:
 
 Dark mode is automatically supported via `.dark` parent class or `prefers-color-scheme: dark`.
 
-## Usage with React
+## React
 
-The pickers are vanilla JS, so mount them in `useEffect` with a ref:
+`@ottabase/ottadate/react` ships controlled components over the vanilla pickers: `DatePicker`, `DateRangePicker`,
+`DateTimePicker`, `FuzzyDateTimePicker` and `FuzzyDateTimeCompact`. React is an optional peer dependency, so the root
+entry stays framework-agnostic. Import the stylesheet once, anywhere in the app.
 
 ```tsx
-import { useEffect, useRef } from 'react';
-import { OttaDate } from '@ottabase/ottadate';
+import { useState } from 'react';
+import { getDefaultRangePresets, type DateRange, type FuzzyDateTime } from '@ottabase/ottadate';
+import { DatePicker, DateRangePicker, DateTimePicker, FuzzyDateTimePicker } from '@ottabase/ottadate/react';
 import '@ottabase/ottadate/styles.css';
 
-function MyDatePicker({ value, onChange }) {
-    const ref = useRef<HTMLDivElement>(null);
-    const pickerRef = useRef<ReturnType<typeof OttaDate.createDatePicker>>();
+// Build presets once: a new list every render is pushed into the picker every render
+const PRESETS = getDefaultRangePresets();
 
-    useEffect(() => {
-        if (!ref.current) return;
-        pickerRef.current = OttaDate.createDatePicker(ref.current, {
-            value,
-            onChange,
-        });
-        return () => pickerRef.current?.destroy();
-    }, []);
+export function EventForm() {
+    const [due, setDue] = useState<number | string | Date | null>(null); // UTC unix seconds
+    const [startsAt, setStartsAt] = useState<number | string | Date | null>(null);
+    const [range, setRange] = useState<DateRange>({ start: null, end: null });
+    const [happened, setHappened] = useState<FuzzyDateTime | null>(null);
 
-    useEffect(() => {
-        pickerRef.current?.setValue(value);
-    }, [value]);
+    return (
+        <form>
+            <label htmlFor="due">Due date</label>
+            <DatePicker id="due" name="due" placeholder="Pick a date…" value={due} onChange={setDue} />
 
-    return <div ref={ref} />;
+            <DateTimePicker aria-label="Starts at" minuteStep={15} use12Hour value={startsAt} onChange={setStartsAt} />
+
+            <DateRangePicker aria-label="Reporting window" presets={PRESETS} value={range} onChange={setRange} />
+
+            <FuzzyDateTimePicker
+                aria-label="When did it happen?"
+                resolutions={['decade', 'year', 'month', 'day']}
+                value={happened}
+                onChange={setHappened}
+            />
+        </form>
+    );
 }
 ```
+
+- **Props** are the vanilla options (`timezone`, `timestampFormat`, `minDate`, `presets`, `showSeconds`, `resolutions`,
+  …) plus `value`, `onChange`, `className` (wrapper div), `disabled`, `placeholder`, and `id` / `aria-label` /
+  `aria-labelledby` / `aria-describedby` / `aria-invalid` / `aria-required`, which land on the trigger button (on the
+  picker root when `inline`). `name` renders a hidden input carrying `value` (the last pick when uncontrolled) for
+  native form posts (unix/ISO as-is, `Date` as ISO, ranges and fuzzy values as JSON, empty when null).
+- **Controlled.** A changed `value` goes through the instance's `setValue`; the picker is not rebuilt. A parent render
+  that leaves `value` alone does not touch the picker, so a half-picked range survives it. If the parent ignores an
+  `onChange`, the picker snaps back to `value`. Leave `value` out for an uncontrolled picker.
+- **Rebuilds** happen only when an option the picker reads once at creation changes: `timezone`, `inline`, `minDate`,
+  `maxDate`, or `presets` going from none to some. Other option changes go through `setOptions`. A new `onChange`
+  identity never rebuilds.
+- **SSR-safe.** Nothing touches the DOM until the mount effect runs.
 
 ## Nuances
 
@@ -21574,14 +21827,18 @@ site's **logo** appears in every theme's navigation (`SiteBrand`), next to the n
 site name" is on, in which case the name becomes the logo's alt text.
 
 ```tsx
-import { getTheme, schemeInitScript, themeStyles } from '@ottabase/ottalanding';
+import { getTheme, SCHEME_STORAGE_KEY, themeStyles } from '@ottabase/ottalanding';
 import { LandingView } from '@ottabase/ottalanding/react';
+import { sanitizeJsonForScript } from '@ottabase/utils/sanitize';
+
+// Fixed markup declared in the file that renders it, which the sanitized-inner-html lint rule accepts.
+const SCHEME_INIT_SCRIPT = `try{var s=localStorage.getItem(${sanitizeJsonForScript(SCHEME_STORAGE_KEY)});if(s==='light'||s==='dark')document.documentElement.setAttribute('data-scheme',s)}catch(e){}`;
 
 const theme = getTheme(site.theme);
 const { css, fonts } = themeStyles(theme.id); // inject in <head>
 <html data-scheme={theme.scheme} suppressHydrationWarning>
     <head>
-        <script dangerouslySetInnerHTML={{ __html: schemeInitScript() }} /> {/* before the styles */}…
+        <script dangerouslySetInnerHTML={{ __html: SCHEME_INIT_SCRIPT }} /> {/* before the styles */}…
     </head>
     <LandingView site={site} sections={page.sections} currentPath="/pricing" />
 </html>;
@@ -21594,8 +21851,8 @@ taken from its preset.
 
 - **Visitors** switch with the toggle in the navigation (`SchemeToggle`). It sets `data-scheme` on `<html>` and saves
   the choice in `localStorage` under `ottalanding.scheme`.
-- **First paint** is already correct: `schemeInitScript()` re-applies a saved choice before the stylesheet paints.
-  Without a saved choice, the theme's default (server-rendered as `data-scheme`) stays.
+- **First paint** is already correct: the layout's `SCHEME_INIT_SCRIPT` re-applies a saved choice before the stylesheet
+  paints. Without a saved choice, the theme's default (server-rendered as `data-scheme`) stays.
 - **CSS:** `selector` holds the default palette, and `selector[data-scheme="light|dark"]` pins either one. Components
   use only design tokens, so nothing inside a theme needs a `dark:` variant.
 - **Admin preview:** `<LandingPreview scheme="dark">` renders a page in either mode inside its own scoped frame.
@@ -23704,11 +23961,37 @@ const publishAll = useApiMutation({
 });
 ```
 
+#### `useEndpointQuery` / `useEndpointMutation`: typed endpoints
+
+For a route declared with `defineEndpoint` (`@ottabase/utils/endpoint`), the URL, the input and the data are typed by
+the same declaration the Worker serves. The variables of a mutation are the call: `{ params, input }`.
+
+```typescript
+import { endpointQueryKey, useEndpointMutation, useEndpointQuery } from '@ottabase/ottaorm/client';
+import { listSessions, renameSession } from '../ottabase/endpoints/sessions';
+
+const sessions = useEndpointQuery(listSessions, {}, { select: (r) => r.sessions });
+const rename = useEndpointMutation(renameSession, { invalidateKeys: [endpointQueryKey(listSessions)] });
+rename.mutate({ params: { id }, input: { name } }); // a typo in either is a type error
+```
+
+Both are `useApiQuery` / `useApiMutation` underneath: same cache scope, retries and invalidation. A GET endpoint takes
+`useEndpointQuery` (its input goes in the query string, a `string[]` repeating its key), any other method
+`useEndpointMutation`; the wrong one is a type error (and throws at runtime for untyped callers).
+
+- **Cache key**: `[...prefix, params, input]`, so each distinct call is its own entry. The prefix is `queryKey` when you
+  pass one, else `[method, path]`. `endpointQueryKey(endpoint)` is the prefix alone (invalidates every call),
+  `endpointQueryKey(endpoint, call, queryKey?)` one call's key.
+- **Lazy URL**: the URL is built when the query runs, so `queryOptions: { enabled: false }` with a param not known yet
+  does not throw during render.
+- **Wire types**: `input` is the parser's input type, so a zod field with `.default()` may be left out by the caller.
+
 #### Convention: always declare `entity`
 
 | Scenario                 | Correct hook                                  |
 | ------------------------ | --------------------------------------------- |
 | Standard CRUD on a model | `createModelHooks`                            |
+| Typed custom endpoint    | `useEndpointQuery` / `useEndpointMutation`    |
 | Custom GET endpoint      | `useApiQuery({ entity, queryKey, endpoint })` |
 | Custom query function    | `useEntityQuery(entity, queryFn, { subKey })` |
 | Custom mutation          | `useApiMutation({ invalidateEntities })`      |
@@ -25272,6 +25555,22 @@ subject, text and HTML bodies, message ids, headers, attachments (as `ArrayBuffe
 for the Worker: unknown mailboxes are rejected at SMTP time, oversize or unparseable mail is rejected with a reason, and
 your `onMessage` receives the parsed message. Parsing is `postal-mime`.
 
+`headers` keeps the first occurrence of each header (lowercased): every server prepends, so the topmost copy is the
+receiving server's and a copy the sender wrote lower down never replaces it. `edgeHeaders` holds only the headers above
+the topmost `Received` line, which only the receiving server can have written (empty when there is no `Received` line).
+Read an authentication verdict from there, never from `headers`:
+
+```typescript
+import { passesDmarc } from '@ottabase/postmaster';
+
+// true only when the receiving server's own verdict (ARC-Authentication-Results, else Authentication-Results)
+// says dmarc=pass with header.from = the From address's domain.
+const trusted = passesDmarc(mail.edgeHeaders, 'mx.cloudflare.net', mail.from?.address);
+```
+
+`mx.cloudflare.net` is Cloudflare Email Routing's authserv-id; behind another inbound server, pass the id its verdict
+header starts with. No verdict, another server's verdict, `dmarc=none`, a softfail or another domain all return `false`.
+
 ## Suppression
 
 ```typescript
@@ -26516,7 +26815,9 @@ The Node optimizer is `sharpOptimizer`, and `sharp` is an optional peer dependen
 Pass `optimizer: null` to keep Chrome's bytes, or your own `(bytes, { format, quality }) => Uint8Array`.
 
 For custom flows such as signing in first, compose the parts yourself: `openBrowser()` gives you a CDP `send`, and you
-call `captureShot(send, { origin, shot: normalizeShot(input) })` between your own steps.
+call `captureShot(send, { origin, shot: normalizeShot(input) })` between your own steps. Its `close()` stops Chrome and
+removes the temporary profile a second later, retrying while Windows still holds it; a folder it cannot remove is left
+for the OS, never thrown, so closing cannot end the process that took the shots.
 
 ## From a Worker (the route)
 
@@ -27780,6 +28081,118 @@ import {
   in `currentColor` follows the theme, and a fixed fill is kept for multicolour marks.
 - **VisuallyHidden** keeps text for screen readers only (`sr-only`); `asChild` hides your own element.
 
+## Input building blocks
+
+`NumberInput`, `PasswordInput`, `FileInput` and `ColorInput` are on the root and on their own entries
+(`@ottabase/ui/number-input`, …). Each forwards its ref to the native `<input>` and stamps `data-slot` parts.
+
+```tsx
+import { ColorInput, FileInput, NumberInput, PasswordInput, Slider, Textarea } from '@ottabase/ui';
+
+// Number: typed as text (inputMode="decimal"), value is number | null
+<NumberInput value={price} onChange={setPrice} min={0} max={10_000} step={0.5} decimalScale={2}
+    prefix="$" thousandSeparator name="price" />
+<NumberInput value={ms} onChange={(v) => setMs(v ?? 0)} min={0} decimalScale={0} suffix="ms" hideControls />
+
+// Password: reveal toggle, opt-in rule checklist (true = passwordRequirements(minLength ?? 8))
+<PasswordInput id="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" requirements />
+<PasswordInput requirements={[{ label: 'No spaces', test: (p) => !/\s/.test(p) }]} />
+
+// File: click-to-choose box; maxSize refuses with a message; previews a picked image
+<FileInput accept="image/*" maxSize={2 * 1024 * 1024} imagePreview onChange={([file]) => upload(file)} onClear={reset} />
+<FileInput multiple loading={uploading} error={uploadError} previewUrl={savedUrl} />
+
+// Color: swatch + native picker + hex text; value is '#rrggbb' | null
+<ColorInput value={accent} onChange={setAccent} swatches={['#0ea5e9', '#22c55e', '#f97316']} clearable />
+
+// Range slider: one thumb per value
+<Slider defaultValue={[20, 80]} thumbLabels={['Minimum', 'Maximum']} />
+
+// Textarea that grows with its content (CSS field-sizing, no JS)
+<Textarea autosize minRows={2} maxRows={8} />
+```
+
+- **NumberInput** keeps what you type while you edit: a number in range applies as typed, leaving the field (or Enter)
+  clamps the rest (`clampOnBlur`, default on). ArrowUp/ArrowDown step (Shift ×10); the stepper buttons are mouse-only
+  (`hideControls` hides them). `allowNegative` defaults to `min < 0`. `name` writes the plain number to a hidden input,
+  so a native form posts `1234.5`, never `$1,234.50`. With react-hook-form use a `Controller` (the value is a number,
+  not an event). `className` styles the box, `inputClassName` the text field.
+- **PasswordInput**'s toggle is a pressed-state button named "Show password". The checklist (`requirements`) appears
+  once something is typed and is linked to the field with `aria-describedby`.
+- **FileInput**'s native input sits inside the box, visually hidden but focusable, so keyboard and screen readers get
+  the platform picker. `previewUrl` overrides the automatic preview (sanitise untrusted URLs); the remove button shows
+  only with `onClear`. Uploading stays with the caller (`@ottabase/forms` FormField does it for `file`/`image` fields).
+- **ColorInput** accepts `#abc`, `abc` or `#aabbcc` and emits lowercase `#rrggbb`; invalid text is flagged
+  (`aria-invalid`) and reverts on blur. Hex only.
+- **Checkbox** with `checked="indeterminate"` shows a dash.
+
+## Display building blocks
+
+```tsx
+import {
+    DataList, DataListItem, DataListLabel, DataListValue, LoadingOverlay, Indicator, Avatar, AvatarFallback,
+    Highlight, ShowMore, OverflowList, Tag, TableOfContents, DiffView,
+} from '@ottabase/ui';
+
+<DataList orientation="vertical" className="sm:grid-cols-2">
+    <DataListItem>
+        <DataListLabel>Release</DataListLabel>
+        <DataListValue>1.4.2</DataListValue>
+    </DataListItem>
+</DataList>
+
+<div className="relative" aria-busy={saving}>
+    <Form />
+    <LoadingOverlay visible={saving} label="Saving…" />
+</div>
+
+<Indicator count={unread} indicatorLabel={`${unread} unread`}>
+    <Avatar><AvatarFallback>DT</AvatarFallback></Avatar>
+</Indicator>
+<Indicator tone="green" processing position="bottom-end" offset={4}><Avatar>…</Avatar></Indicator>
+
+<Highlight highlight={query}>{item.name}</Highlight>
+
+<ShowMore maxHeight={160}><pre>{alert.body}</pre></ShowMore>
+
+<OverflowList items={tags} className="gap-1.5" renderItem={(tag) => <Tag>{tag}</Tag>} />
+
+<TableOfContents items={[{ id: 'setup', label: 'Setup', depth: 2 }]} selector=".prose h2, .prose h3" title="On this page" />
+
+<DiffView before={{ name: 'Old', plan: 'pro' }} after={{ name: 'New', plan: 'pro' }} />  // field diff
+<DiffView before={oldText} after={newText} />                                            // line diff
+<DiffView parts={diffWords(oldText, newText)} />                                         // your own word diff
+```
+
+- **DataList** is a `<dl>`: `orientation="horizontal"` (default) puts labels in their own column (each item a subgrid
+  row, so values line up); `vertical` stacks label over value. `size` is `sm` or `default`. A server component.
+- **LoadingOverlay** covers its `relative` parent: content stays visible, dimmed and blurred, under a spinner and an
+  optional `label`. It is a polite `role="status"`; mark the covered region `aria-busy`. `visible={false}` renders
+  nothing; `blur={false}` only dims. Its root is a `<span>`, so it is valid inside a button.
+- **Indicator** pins a dot (no `label`/`count`) or a mark to a corner of its child: `count` caps at `max` ("99+") and
+  hides at zero unless `showZero`; `position` is `top-end` (default), `top-start`, `bottom-end` or `bottom-start`;
+  `offset` moves it in from the corner (round children); `tone` reads the tone map; `processing` pulses (still under
+  reduced motion); `disabled` hides it; `indicatorLabel` is what a screen reader hears.
+- **Highlight** wraps case-insensitive matches of `highlight` (a string or several) in `<mark>`; regex characters are
+  literal. `highlightClassName` restyles the marks (`bg-transparent font-semibold` in a picker list).
+- **ShowMore** clamps content to `maxHeight` px with a fade and shows "Show more" / "Show less" only when the content is
+  taller. `expanded`/`defaultExpanded`/`onExpandedChange`, `showLabel`/`hideLabel`. (The blur-to-reveal `Spoiler` in
+  `@ottabase/ottarenderer` is a different thing.)
+- **OverflowList** renders as many items as fit on one line, measured with real widths and re-fitted on resize, then
+  `renderOverflow(hidden)` (default a "+N" `CountBadge`). `minVisible` keeps some items regardless. Every item shows
+  until the row has a width (server render, tests).
+- **TableOfContents** lists `{ id, label, depth }` links. Pass `activeId`, or a `selector` for the headings and it
+  follows the scroll itself (`useScrollSpy`; `rescanKey` re-scans for a new document). A click scrolls (smoothly unless
+  the OS asks for reduced motion) and replaces the URL hash without the router seeing a navigation, then calls
+  `onItemClick`; Ctrl/Cmd/middle clicks open the link as usual. `unstyled` drops the Tailwind look so your CSS can style
+  the parts (`toc`, `toc-title`, `toc-list`, `toc-item`, `toc-link` with `data-active` and a `--toc-depth` variable);
+  `@ottabase/docs` and `@ottabase/legal` do that.
+- **DiffView** is a read-only before/after. Two objects give a field diff (added, removed, `old → new`; nested values as
+  compact JSON, compared deeply; `showUnchanged` lists the rest). Two strings give a line diff (a built-in LCS, no
+  dependency; CRLF counts as LF and a final newline is not an extra line). `parts` takes changes you computed, in the
+  `diff` package's `{ value, added?, removed? }` shape, for a word-level diff of prose. `diffFields` and `diffLines` are
+  exported too. The admin audit log shows `changes` with it.
+
 ## Theming hooks (Brand Engine)
 
 Components are fully themeable by the brand engine without forking:
@@ -27820,6 +28233,51 @@ Components are fully themeable by the brand engine without forking:
     `button`, `badge`, `card` and `input` resolve overrides from context, receiving their original props. Prefer the CSS
     path; reserve overrides for DOM-level differences. These primitives declare explicit React client boundaries because
     resolving an override reads context; the package build preserves those directives for Next.js/RSC consumers.
+
+## Hooks
+
+Generic DOM hooks, on the root entry and on `@ottabase/ui/hooks`. Reach for them before writing a `useEffect` with a
+document listener, a `setTimeout` debounce or raw `localStorage`.
+
+```tsx
+import {
+    CopyButton,
+    useClickOutside,
+    useDebouncedCallback,
+    useHotkeys,
+    useLocalStorage,
+    useMediaQuery,
+} from '@ottabase/ui';
+import { useRef, useState } from 'react';
+
+export function Toolbar({ onSearch }: { onSearch: (term: string) => void }) {
+    const [open, setOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const [density, setDensity] = useLocalStorage<'compact' | 'comfortable'>('app.density', 'comfortable');
+    const isMobile = useMediaQuery('(max-width: 767px)');
+    const search = useDebouncedCallback(onSearch, 300);
+
+    useClickOutside(menuRef, () => setOpen(false), open); // listens only while open
+    useHotkeys([
+        ['mod+k', () => setOpen(true)],
+        ['escape', () => setOpen(false)],
+    ]);
+
+    return (
+        <div ref={menuRef} data-density={density}>
+            <input onChange={(e) => search(e.target.value)} />
+            {!isMobile && <CopyButton value="ok_live_123" label="API key" notify />}
+            <button onClick={() => setDensity('compact')}>Compact</button>
+        </div>
+    );
+}
+```
+
+- `useLocalStorage` stores JSON and syncs every hook on the key, across tabs too; `getStorageValue` / `setStorageValue`
+  do the same outside React. Setting `undefined` removes the key.
+- `useHotkeys` skips single-key shortcuts while typing in a field; `mod` shortcuts (Cmd or Ctrl) still fire there.
+- Also: `useClipboard` (custom copy UI), `useDebouncedValue`, `useReducedMotion`, `useElementSize`, `useMergedRef`,
+  `useScrollSpy`, `useLatest`, `parseShortcut`, `isEditableTarget`.
 
 ## Base styles
 
@@ -28887,8 +29345,6 @@ pnpm add @ottabase/utils
 
 ```typescript
 import {
-    fileExists,
-    readFile,
     isEmail,
     changeCase,
     makeSlug,
@@ -28899,12 +29355,13 @@ import {
     parseCurrencyValue,
     parseNameAndEmail,
     parseJsonFromString,
-    getLastCommitMessage,
-    getCurrentBranch,
     isBrowser,
     isMobileBrowser,
 } from '@ottabase/utils';
 ```
+
+The root is edge-safe. The Node-only helpers (`node:fs`, `child_process`) are only at their subpaths,
+`@ottabase/utils/file` and `@ottabase/utils/git`, so a Worker or browser bundle never pulls them in.
 
 ### Tree-Shakeable Imports (Recommended)
 
@@ -29031,6 +29488,14 @@ import {
 - **`sanitizeCssForStyleTag(css: string): string`** - Neutralize unsafe CSS when injecting into `<style>` tags
 - **`safeImageProps(value, sizes)`** - `<img>` attributes for a content image (`FileSource`): a stored file's renditions
   with `srcSet`/`sizes`/`width`/`height`, or a sanitized outside address as a lone `src`; null otherwise
+- **`sanitizeHtmlWithoutDom(html: string): string`** - The DOM-free pass on its own, exported for tests. App code calls
+  the `sanitize*Html` functions, which pick the parser when there is one
+
+The three `sanitize*Html` functions run DOMPurify wherever a DOM exists (a browser, Node with jsdom). A Worker has no
+DOM, so they fall back to a single-pass, linear-time cleaner: it cuts `<script>` and `<style>` elements with their
+content, drops what is left of script, style, iframe, object, embed, link, meta, base, form and SVG `<animate>`/`<set>`
+tags (closed or not), strips `on*` handlers and rewrites `href`/`src` through `sanitizeUrl` inside tags only (also after
+a slash or a quote, as in `<img/src=x/onerror=…>`), then applies the same tag allowlist.
 
 Use the appropriate sanitizer helper for each untrusted renderer input type:
 
@@ -29084,6 +29549,75 @@ return errorResponse(error instanceof Error ? error.message : 'Database failure'
 Use `exposure: 'public'` only when the 5xx message is deliberately authored as safe public API copy. Use `metadata` for
 JSON-safe machine-readable context on 4xx responses; `details` remains human-readable text. A typed `ServiceError` may
 carry `internalCause` for the server error boundary to redact and log once; it is never part of `toApiResponse()`.
+
+`redactErrorForLog(error, maxLength = 2000)` turns any thrown value into `{ name, message, stack? }` safe for a log sink
+(lint requires it around `console.error`). It redacts private keys (also one cut off before its END line), URL
+credentials (an empty user or an `@` in the password included), an `Authorization` value of any scheme, every cookie of
+a `Cookie`/`Set-Cookie` line, `Bearer` tokens, named secrets (`password`, `access_token`, `clientSecret`,
+`aws_secret_access_key`...) after `=`, `:` or `=>` and inside a JSON string (even one nested in another), `key` and
+`client_secret` in a query string, and tokens recognisable by shape (JWT, AWS key id, Google API key, Stripe, GitHub,
+Slack, Anthropic, OpenAI, `whsec_`, npm, GitLab, a Telegram bot token in its `/bot` path, a Slack webhook path). Words
+that merely contain a keyword (`design`, `tokenizer`, `sessionStorage`) stay readable, and so does a name followed by no
+secret at all: `Unexpected token: <`, `password: Required`, `secrets: permission denied`. Every pattern is bounded and
+the input is read only a fixed distance past `maxLength`, so a hostile error costs a known amount of CPU.
+
+### Typed Endpoints (`@ottabase/utils/endpoint`)
+
+A custom route declared once, in a module the Worker and the browser both import. The path's `:params`, the input and
+the response are typed from that one value; no codegen.
+
+```typescript
+import { defineEndpoint, endpointHandler, returns } from '@ottabase/utils/endpoint';
+import { z } from 'zod';
+
+// ottabase/endpoints/sessions.ts: shared
+export const renameSession = defineEndpoint({
+    method: 'PATCH',
+    path: '/api/users/me/sessions/:id',
+    input: z.object({ name: z.string().trim().min(1).max(40) }), // zod-like (parse/safeParse) or any Standard Schema
+    output: returns<{ session: SessionSummary }>(),
+});
+
+// The Worker: the guard runs first; params.id, input.name and auth are typed; returning anything
+// but the output is a type error.
+router.patch(
+    renameSession.path,
+    endpointHandler(
+        renameSession,
+        async (c, { params, input, auth }) => {
+            const session = await rename(auth.userId, params.id, input.name);
+            return session ? { session } : errorResponse('Session not found', 404, { code: 'SESSION_NOT_FOUND' });
+        },
+        { guard: requireIdentity, headers: { 'Cache-Control': 'private, no-store' } },
+    ),
+);
+```
+
+`endpointHandler(endpoint, handler, { guard?, headers?, status? })` works in this order:
+
+1. **`guard(c)`** runs before anything is read: a returned `Response` (a 401) goes out as is, so an anonymous caller
+   never learns which fields are invalid; a returned value reaches the handler as `call.auth`.
+2. **Path params** come from the router, else from the URL (one trailing slash ignored). No match, or a segment that is
+   not valid percent-encoding, is a 404.
+3. **The input**, only when the endpoint declares one (a body is never read otherwise): the query string for GET, where
+   a repeated key is a `string[]`, or the JSON body. 400 `INVALID_JSON` / `VALIDATION_ERROR` with field errors.
+4. **The result**: a value is sent as JSON with `status` (`204` sends no body); a returned `Response` passes through.
+   `headers` are added to either when the response lacks them.
+
+Types: the browser sends the parser's **input** type (zod `_input`, Standard Schema `types.input`: a field with a
+default may be left out) and the handler receives its **output** type. A GET input must be strings
+(`string | string[] | undefined` per field; zod's `z.coerce.number()` has a `number` input type, so take a string and
+convert it in the handler), and a path param is read up to the first character outside `[A-Za-z0-9_]` (`/files/:id.json`
+gives `{ id }`); `:id?` optional params are refused. A hand-written parser annotates its argument
+(`parse: (value: unknown) => ...`), or TypeScript cannot infer it.
+
+`output: returns<T>()` is a compile-time check only: whatever the handler returns is sent, extra fields included. To
+strip or validate the response at runtime, also declare `outputSchema` (a zod object strips unknown keys); a response
+that fails it is logged and answered 500 `INVALID_RESPONSE`.
+
+`endpointUrl(endpoint, params)` builds the URL (each param encoded; a missing one throws), `endpointQuery(input)` the
+query string, `matchEndpointPath(path, pathname)` reads params back. The browser side is `useEndpointQuery` /
+`useEndpointMutation` in `@ottabase/ottaorm/client`.
 
 ### Environment Utilities (`@ottabase/utils/env`) - Server-side
 

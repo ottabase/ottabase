@@ -73,8 +73,7 @@ export async function readBody(request: Request): Promise<Body> {
 export const fail = (message: string, status: number, code: string): Response =>
     errorResponse(message, status, { code });
 
-export const reauthRequired = () =>
-    fail('Sign in again to change how you sign in. It keeps a borrowed session from doing it.', 403, 'REAUTH_REQUIRED');
+export const reauthRequired = () => fail('Sign in again to change how you sign in.', 403, 'REAUTH_REQUIRED');
 
 export const passkeysUnavailable = () =>
     fail(
@@ -264,7 +263,8 @@ export async function attemptRefused(userId: string, pending?: { jti: string; ex
               ]
             : []),
     ];
-    const counts = await VerificationToken.recordAttempts(scopes);
+    // Sweeps every expired attempt row, so per-sign-in counters do not pile up after their window.
+    const counts = await VerificationToken.recordAttempts(scopes, 'factor-attempt');
     return counts.some((count, i) => count > scopes[i].limit);
 }
 

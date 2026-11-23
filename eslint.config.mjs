@@ -794,7 +794,6 @@ export default [
             'apps/*/src/pages/admin/appearance/brand/brandApi.ts',
             'apps/*/src/pages/admin/content/blog/AdminBlogEditorPage.tsx',
             'apps/*/src/pages/admin/infrastructure/MigrationsPage.tsx',
-            'apps/*/src/pages/auth/LoginPage.tsx',
             'apps/*/src/pages/demo/cloudflare/CloudflareR2DemoPage.tsx',
             'apps/*/src/pages/demo/CodeBlockDemoPage.tsx',
         ],

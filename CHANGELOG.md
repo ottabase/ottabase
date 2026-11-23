@@ -30,10 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   package root that reaches `react-dom` or the UI kit, checked one import deep), `ottabase/sanitized-inner-html`
   (`dangerouslySetInnerHTML`, JSX spreads and `createElement` included, without one of the exported sanitizers) and
   `ottabase/no-raw-d1` (any touch of a D1 binding in app server code beyond a presence check). Type-only imports pass.
-  They cover Ottabase Pro under `packages/pro` too, templates included. Sanctioned files carry their reason in the
-  config; a test lints snippets to prove each rule fires and each evasion fails. The root lint config is now a Turbo
-  input, so changing it re-runs every lint. `@ottabase/utils` no longer re-exports its Node-only `file` and `git`
-  modules from the root.
+  They cover Ottabase Pro under `packages/pro` too, and its templates once copied into an app. Sanctioned files carry
+  their reason in the config; a test lints snippets to prove each rule fires and each evasion fails. The root lint
+  config is now a Turbo input, so changing it re-runs every lint. `@ottabase/utils` no longer re-exports its Node-only
+  `file` and `git` modules from the root.
 - **Passkeys and two-factor sign-in, in `@ottabase/auth`.** Passkeys (WebAuthn: ES256, RS256 and Ed25519, user
   verification required, attestation `none`) sign in without a password or a code. An authenticator app (TOTP, RFC 6238)
   or a passkey turns two-factor on: every password, magic-link and OAuth sign-in then asks for a code, a passkey or one

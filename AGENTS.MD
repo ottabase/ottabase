@@ -99,9 +99,10 @@ Rule for months while hand-rolled JSON error responses kept shipping.
 | `ottabase/sanitized-inner-html`      | `dangerouslySetInnerHTML` (spread or `createElement` too) unsanitized | an exported sanitizer (`sanitizeBlockHtml(...)` and friends) or `sanitized...` |
 | `ottabase/no-raw-d1`                 | any use of a D1 binding in app server code beyond a presence check    | a model method (RLS, tenant scope, casts come with it)                         |
 
-The invariants cover Ottabase Pro too (`packages/pro/*/src` and its `app/` templates). Each rule has sanctioned files in
-`eslint.config.mjs` (Node-only entrypoints, the bootstrap that runs before the models' tables exist, static markup) with
-the reason beside them; `packages/scripts/src/__tests__/lint-invariants.test.ts` proves every rule fires.
+The invariants cover Ottabase Pro too (`packages/pro/*/src`, and its `app/` templates once `otta add` copies them into
+an app). Each rule has sanctioned files in `eslint.config.mjs` (Node-only entrypoints, the bootstrap that runs before
+the models' tables exist, static markup) with the reason beside them;
+`packages/scripts/src/__tests__/lint-invariants.test.ts` proves every rule fires.
 
 Rules of engagement:
 

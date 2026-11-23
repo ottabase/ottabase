@@ -2,7 +2,7 @@
 // @ottabase/ottaorm - VerificationToken Model
 // ============================================================
 
-import { and, eq, gt, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, like, lt, or, sql } from 'drizzle-orm';
 import { BaseModel, ModelFields, type PackageType } from '../base/BaseModel';
 import { verificationTokensTable } from './VerificationToken.schema';
 
@@ -198,18 +198,26 @@ export class VerificationToken extends BaseModel {
      * Count one attempt against each of these identifiers, then answer how many live attempts
      * each holds now, this one included. Insert-then-count is what makes a limit race-safe: of
      * any number of parallel attempts, the k-th insert sees at least k rows, so no more than
-     * `limit` of them can see a count within the limit. Expired attempts are purged first.
+     * `limit` of them can see a count within the limit. Expired attempts are purged first: those
+     * of these identifiers, and every expired one under `sweepPrefix` (identifiers that are never
+     * counted again once their window ends, such as one per pending sign-in).
      */
-    static async recordAttempts(attempts: Array<{ identifier: string; expires: number }>): Promise<number[]> {
+    static async recordAttempts(
+        attempts: Array<{ identifier: string; expires: number }>,
+        sweepPrefix?: string,
+    ): Promise<number[]> {
         if (attempts.length === 0) return [];
         const db = this.getDriver().getDb();
         const identifiers = attempts.map((attempt) => attempt.identifier);
+        const t = verificationTokensTable;
         await db
-            .delete(verificationTokensTable)
+            .delete(t)
             .where(
                 and(
-                    inArray(verificationTokensTable.identifier, identifiers),
-                    lt(verificationTokensTable.expires, Date.now()),
+                    sweepPrefix
+                        ? or(inArray(t.identifier, identifiers), like(t.identifier, `${sweepPrefix}%`))
+                        : inArray(t.identifier, identifiers),
+                    lt(t.expires, Date.now()),
                 ),
             );
         await db.insert(verificationTokensTable).values(

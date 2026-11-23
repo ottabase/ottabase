@@ -37,7 +37,7 @@
 - [@ottabase/api](packages/api/README.md): Type-safe fetch wrapper with error handling.
 - [@ottabase/apikeys](packages/apikeys/README.md): API keys for the end users of an Ottabase app: hashed at rest, scoped, expiring, revocable, shown once, verified in one lookup.
 - [@ottabase/audit](packages/audit/README.md): Audit logging for multi-tenant applications with RBAC context integration.
-- [@ottabase/auth](packages/auth/README.md): Lightweight, dependency-free authentication for Ottabase apps on Cloudflare Workers + D1. Signed session cookies, PBKDF2 credentials, generic OAuth2/OIDC, and magic-link email sign-in — all built on…
+- [@ottabase/auth](packages/auth/README.md): Lightweight, dependency-free authentication for Ottabase apps on Cloudflare Workers + D1. Signed session cookies, PBKDF2 credentials, generic OAuth2/OIDC, magic-link email sign-in, passkeys and…
 - [@ottabase/brand-engine](packages/brand-engine/README.md): Unified theme engine for Ottabase — design tokens, preset template expansion, CSS variable injection, email branding, and brand persistence via D1.
 - [@ottabase/brand-engine-react](packages/brand-engine-react/README.md): React bindings for Ottabase Brand Engine — brand config provider, theme application, and layout resolution.
 - [@ottabase/cf](packages/cf/README.md): Framework-agnostic Cloudflare bindings wrapper for TypeScript applications.
