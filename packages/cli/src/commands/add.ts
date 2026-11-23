@@ -150,7 +150,20 @@ function packageDir(root: string, bare: string): string | null {
     return candidates.find((dir) => fs.existsSync(path.join(root, dir, 'package.json'))) ?? null;
 }
 
-/** `packages/<bare>` with no package.json of its own but packages inside: a bundle such as `pro`. */
+/** Does this package.json carry an `ottabase` descriptor (something an app can be wired with)? */
+function hasDescriptor(file: string): boolean {
+    try {
+        return !!(JSON.parse(fs.readFileSync(file, 'utf8')) as { ottabase?: unknown }).ottabase;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * `packages/<bare>` with no package.json of its own but packages inside: a bundle such as `pro`.
+ * Its members are the packages that carry a descriptor; a tool in the bundle with nothing to wire
+ * into an app (Pro's review action) is not one.
+ */
 export function listBundle(root: string, requested: string): string[] | null {
     const bare = bareName(requested);
     if (!NAME.test(bare)) return null;
@@ -158,7 +171,7 @@ export function listBundle(root: string, requested: string): string[] | null {
     if (!fs.existsSync(dir) || fs.existsSync(path.join(dir, 'package.json'))) return null;
     const members = fs
         .readdirSync(dir)
-        .filter((name) => NAME.test(name) && fs.existsSync(path.join(dir, name, 'package.json')))
+        .filter((name) => NAME.test(name) && hasDescriptor(path.join(dir, name, 'package.json')))
         .sort()
         .map((name) => `${bare}/${name}`);
     return members.length > 0 ? members : null;

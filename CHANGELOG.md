@@ -802,6 +802,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed (Unreleased)
 
+- **`otta add pro` no longer stops at a Pro folder with nothing to wire.** A bundle's members are now the packages that
+  carry an `ottabase` descriptor; a tool shipped alongside them (Pro's review action) is left out instead of failing the
+  whole add with "has no ottabase descriptor".
 - **`@ottabase/auth`: a failing sign-in handler escaped the router's catch.** `handleAuthRequest` returned each
   handler's promise from inside its `try` without awaiting it, so a thrown error (a database outage mid sign-in)
   rejected past the generic 500 and its redacted log. Every handler is awaited now.

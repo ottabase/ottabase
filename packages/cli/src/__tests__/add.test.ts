@@ -214,6 +214,12 @@ describe('listBundle', () => {
         expect(listBundle(root, 'nope')).toBeNull();
         expect(listBundle(root, '../etc')).toBeNull();
     });
+
+    it('leaves out a member with nothing to wire (no ottabase descriptor)', () => {
+        const root = fixture();
+        fs.outputJsonSync(path.join(root, 'packages/pro/review/package.json'), { name: '@ottabase/review' });
+        expect(listBundle(root, 'pro')).toEqual(['pro/payport', 'pro/tower']);
+    });
 });
 
 describe('planAdd and applyAdd', () => {
