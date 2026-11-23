@@ -73,11 +73,10 @@ export async function createVerificationToken(
     const tokenHash = await hashToken(token);
     const expiresAt = Date.now() + ttlSeconds * 1000;
 
-    try {
-        await env.OBCF_D1.prepare(`DELETE FROM verification_tokens WHERE identifier = ?`).bind(identifier).run();
-    } catch {
+    // One live token per identifier: a new link invalidates the previous one.
+    await VerificationToken.deleteByIdentifier(identifier).catch(() => {
         // ignore cleanup errors
-    }
+    });
 
     await VerificationToken.create({
         identifier,

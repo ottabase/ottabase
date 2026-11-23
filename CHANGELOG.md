@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **Four more rules in the root lint config, for what AGENTS.MD only said in prose.** `ottabase/no-node-only-imports`
+  (`fs`, `child_process`, threads in edge or browser code), `ottabase/headless-root` (a package root that reaches
+  `react-dom` or the UI kit, checked one import deep), `ottabase/sanitized-inner-html` (`dangerouslySetInnerHTML`
+  without a sanitizer) and `ottabase/no-raw-d1` (the D1 binding called from app server code). They cover Ottabase Pro
+  under `packages/pro` too. Sanctioned files carry their reason in the config; the audit log route is the one ratchet
+  entry; a test lints snippets to prove each rule fires.
 - **Passkeys and two-factor sign-in, in `@ottabase/auth`.** Passkeys (WebAuthn: ES256, RS256 and Ed25519, user
   verification required, attestation `none`) sign in without a password or a code. An authenticator app (TOTP, RFC 6238)
   adds a code after every password, magic-link and OAuth sign-in, with ten single-use recovery codes. Web Crypto only,

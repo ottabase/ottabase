@@ -12,12 +12,13 @@ export interface HtmlRendererProps {
  * block renderer uses. Everything passes through `sanitizeBlockHtml` first.
  */
 export function HtmlRenderer({ content, className, ugc = false }: HtmlRendererProps) {
-    const html = sanitizeBlockHtml(content);
+    // markUgcLinks only adds rel attributes to the links of already sanitized HTML.
+    const sanitized = ugc ? markUgcLinks(sanitizeBlockHtml(content)) : sanitizeBlockHtml(content);
     return (
         <div
             className={['ottarenderer ottarenderer--html', className].filter(Boolean).join(' ')}
             data-slot="renderer"
-            dangerouslySetInnerHTML={{ __html: ugc ? markUgcLinks(html) : html }}
+            dangerouslySetInnerHTML={{ __html: sanitized }}
         />
     );
 }
