@@ -23,6 +23,12 @@ export interface User {
     organizationId?: string | null;
     roles?: string[];
     permissions?: string[];
+    /** Two-factor sign-in is on. */
+    twoFactorEnabled?: boolean;
+    /** Epoch ms from which a policy requires two-factor; null when none does. */
+    twoFactorRequiredFrom?: number | null;
+    /** A policy requires two-factor now and it is off: show the setup screen and nothing else. */
+    twoFactorSetupRequired?: boolean;
     [key: string]: any;
 }
 

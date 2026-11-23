@@ -16,7 +16,7 @@
 // ============================================================
 // CORE TABLES (from @ottabase/ottaorm)
 // ============================================================
-export { accountsTable, mediaTable, usersTable, verificationTokensTable } from '@ottabase/ottaorm';
+export { accountsTable, authenticatorsTable, mediaTable, usersTable, verificationTokensTable } from '@ottabase/ottaorm';
 
 // ============================================================
 // APP-SPECIFIC TABLES

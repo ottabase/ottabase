@@ -109,6 +109,7 @@ vi.mock('lucide-react', () => ({
     ChevronsUpDown: () => null,
     Images: () => null,
     MonitorSmartphone: () => null,
+    LockKeyhole: () => null,
     PenLine: () => null,
     ShieldCheck: () => null,
     UserRound: () => null,

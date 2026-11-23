@@ -9,16 +9,22 @@
 //
 // ============================================================
 
-import { createD1Driver } from '@ottabase/db/drizzle-d1';
-import { registerConnection } from '@ottabase/ottaorm';
 import { Account, User, VerificationToken } from '@ottabase/ottaorm/models';
 import { redactErrorForLog } from '@ottabase/utils/http-errors';
 import { withNotice } from '@ottabase/utils/url';
-import { bootstrapFirstUser } from './bootstrap';
 import { requestLocaleDefaults } from './request-locale';
 import { serializeCookie, parseCookies, clearCookie } from './cookies';
-import { hashPassword, verifyPassword, randomToken, getDummyPasswordHash, hashToken } from './crypto';
-import { createCsrfCookiePair, verifyCsrfToken } from './csrf';
+import { verifyPassword, randomToken, getDummyPasswordHash, hashToken } from './crypto';
+import { createCsrfCookiePair } from './csrf';
+import { handleFactorRequest } from './factors';
+import {
+    csrfCookieName,
+    ensureOrmConnection,
+    jsonResponse,
+    requireCsrf,
+    resolveFrontendUrl,
+    sanitizeCallbackPath,
+} from './http';
 import { signJwt, verifyJwt } from './jwt';
 import {
     exchangeCodeForTokens,
@@ -31,17 +37,22 @@ import { resolveMagicLinkSender } from './providers';
 import {
     authCookieBase,
     buildClearSessionCookie,
-    createSessionCookieForUser,
     getSession,
     isProductionCookieEnv,
     resolveAuthSecret,
     resolveSecureCookie,
     resolveSessionCookieName,
-    resolveSessionMaxAge,
     revokeSession,
-    type CreatedSession,
 } from './session-store';
-import type { AuthEnv, AuthEvents, AuthorizedUser, CreateAuthConfigOptions, SessionTokenPayload } from './types';
+import {
+    announce,
+    authorizedUserFrom,
+    jsonForOutcome,
+    signInOrChallenge,
+    twoFactorPageUrl,
+    type SignInOutcome,
+} from './sign-in';
+import type { AuthEnv, AuthorizedUser, CreateAuthConfigOptions, SessionTokenPayload } from './types';
 
 export type {
     AuthEnv,
@@ -54,6 +65,10 @@ export type {
 } from './types';
 export type { FirstUserBootstrapResult } from './bootstrap';
 export { hashPassword, verifyPassword, hashToken } from './crypto';
+export { requireCsrf } from './http';
+export { passkeysAvailable, RECENT_SIGN_IN_MS, resetTwoFactor } from './factors';
+export { completeSignIn, type CompletedSignIn } from './sign-in';
+export { bumpProfileVersion } from './session-store';
 export { bootstrapFirstUser, provisionPlatformOwnerOrganization } from './bootstrap';
 export {
     getSession,
@@ -81,68 +96,9 @@ const CSRF_COOKIE_MAX_AGE = 60 * 60; // 1 hour
 const OAUTH_STATE_MAX_AGE = 10 * 60; // 10 minutes
 const MAGIC_LINK_MAX_AGE_SECONDS = 15 * 60; // 15 minutes -- short-lived, unlike the app's own 24h email-verification links
 
-// __Host- pins to the exact host with Path=/ (used for the root-scoped CSRF cookie);
-// the OAuth-state cookie is scoped to Path=/api/auth so it can only use __Secure-.
-function csrfCookieName(env: AuthEnv): string {
-    return `${isProductionCookieEnv(env) ? '__Host-' : ''}${authCookieBase(env, 'csrf-token')}`;
-}
+// The OAuth-state cookie is scoped to Path=/api/auth so it can only use __Secure- (not __Host-).
 function oauthStateCookieName(env: AuthEnv): string {
     return `${isProductionCookieEnv(env) ? '__Secure-' : ''}${authCookieBase(env, 'oauth-state')}`;
-}
-
-/**
- * Origin allowlist check for state-changing requests: a browser always sends `Origin`
- * on cross-origin (and most same-origin) POSTs, so a present-but-mismatched Origin is
- * rejected as a defense-in-depth backstop to the double-submit CSRF token. A missing
- * Origin (some non-browser clients) falls through to the CSRF-token check.
- */
-function isTrustedOrigin(request: Request, env: AuthEnv): boolean {
-    const origin = request.headers.get('Origin');
-    if (!origin) return true;
-    try {
-        const submitted = new URL(origin).origin;
-        const allowed = new Set<string>([new URL(request.url).origin]);
-        try {
-            allowed.add(new URL(resolveFrontendUrl(env)).origin);
-        } catch {
-            // ignore malformed configured URL
-        }
-        return allowed.has(submitted);
-    } catch {
-        return false;
-    }
-}
-
-function jsonResponse(data: unknown, status = 200, extraHeaders?: HeadersInit): Response {
-    const headers = new Headers({ 'Content-Type': 'application/json' });
-    if (extraHeaders) new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
-    return new Response(JSON.stringify(data), { status, headers });
-}
-
-function ensureOrmConnection(env: AuthEnv): void {
-    if (!env.OBCF_D1) return;
-    registerConnection('default', createD1Driver(env.OBCF_D1));
-}
-
-function resolveFrontendUrl(env: AuthEnv): string {
-    // Strip trailing slashes so `${resolveFrontendUrl(env)}${path}` and the OAuth
-    // redirect_uri never produce a double slash (which would fail an exact redirect-uri
-    // match at the provider and break OAuth).
-    return (env.AUTH_URL || 'http://127.0.0.1:3003').replace(/\/+$/, '');
-}
-
-/** Only relative, single-leading-slash paths are accepted; anything else falls back, blocking open redirects. */
-function sanitizeCallbackPath(raw: string | null | undefined, fallback = '/'): string {
-    if (typeof raw !== 'string' || !raw) return fallback;
-    if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return fallback;
-    try {
-        // Parsing against a dummy base rejects anything that smuggles a scheme/host (e.g. "/\evil.com").
-        const parsed = new URL(raw, 'http://ottabase.internal');
-        if (parsed.origin !== 'http://ottabase.internal') return fallback;
-        return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    } catch {
-        return fallback;
-    }
 }
 
 /**
@@ -168,35 +124,31 @@ function errorRedirect(env: AuthEnv, options: CreateAuthConfigOptions | undefine
 }
 
 /**
- * Runs the app's `onSignIn` hook before the session is issued. False when it threw: the app could
- * not finish the account (its workspace, say), so the caller refuses the sign-in instead of
- * issuing a session for a half-provisioned account.
+ * A redirect-based sign-in's outcome (OAuth, magic link): the destination with the session
+ * cookie, the second-factor page with the pending cookie, or the provisioning error page.
  */
-async function runSignInHook(
-    options: CreateAuthConfigOptions,
-    params: { userId: string; email?: string | null },
-): Promise<boolean> {
-    try {
-        await options.onSignIn?.(params);
-        return true;
-    } catch (error) {
-        console.error(JSON.stringify({ event: 'auth_sign_in_hook_failed', error: redactErrorForLog(error) }));
-        return false;
-    }
-}
-
-/** Hands an account event to the app's `emit`. Best-effort: a listener never fails a sign-in. */
-async function announce<K extends keyof AuthEvents>(
+function redirectForOutcome(
+    outcome: SignInOutcome,
     env: AuthEnv,
     options: CreateAuthConfigOptions,
-    name: K,
-    payload: AuthEvents[K],
-): Promise<void> {
-    try {
-        await options.emit?.(env, name, payload);
-    } catch (error) {
-        console.warn(JSON.stringify({ event: 'auth_event_failed', name, error: redactErrorForLog(error) }));
+    callbackUrl: string,
+    extraCookies: string[] = [],
+): Response {
+    if (outcome.kind === 'failed') {
+        const headers: Array<[string, string]> = [['Location', errorPageUrl(env, options, 'AccountProvisioning')]];
+        for (const cookie of extraCookies) headers.push(['Set-Cookie', cookie]);
+        return new Response(null, { status: 302, headers });
     }
+    const location =
+        outcome.kind === 'session'
+            ? `${resolveFrontendUrl(env)}${callbackUrl}`
+            : twoFactorPageUrl(env, options, callbackUrl);
+    const headers: Array<[string, string]> = [
+        ['Location', location],
+        ['Set-Cookie', outcome.cookie],
+    ];
+    for (const cookie of extraCookies) headers.push(['Set-Cookie', cookie]);
+    return new Response(null, { status: 302, headers });
 }
 
 /**
@@ -243,21 +195,7 @@ async function defaultCredentialsAuthorize(
     const valid = await verifyPassword(password, passwordHash);
     if (!valid) return null;
 
-    const emailVerifiedRaw = user.get('emailVerified');
-    const emailVerified = emailVerifiedRaw
-        ? emailVerifiedRaw instanceof Date
-            ? emailVerifiedRaw.getTime()
-            : Number(emailVerifiedRaw)
-        : null;
-
-    return {
-        id: String(user.get('id')),
-        email: String(user.get('email')),
-        name: (user.get('name') as string | null) ?? undefined,
-        // The uploaded avatar, else the OAuth provider's picture (see User.imageUrl).
-        image: user.imageUrl() ?? undefined,
-        emailVerified,
-    };
+    return authorizedUserFrom(user);
 }
 
 /** Resolve the effective options for a request, applying environment-derived defaults. */
@@ -296,31 +234,6 @@ async function handleGetSession(request: Request, env: AuthEnv, options: CreateA
     return jsonResponse(session ?? null);
 }
 
-/**
- * The 403 to return when a state-changing request fails the Origin or CSRF check, else null.
- * Exported for the app's own routes that sign people in (register), so they hold the same line.
- */
-export async function requireCsrf(request: Request, env: AuthEnv, submittedToken: unknown): Promise<Response | null> {
-    // Defense in depth: reject a mismatched Origin outright before the token check. Its own message, because
-    // the usual cause is opening the app on another loopback name (localhost vs 127.0.0.1), not a bad token.
-    if (!isTrustedOrigin(request, env)) {
-        // Echoed for the developer; capped, since it is whatever the client sent.
-        const origin = (request.headers.get('Origin') ?? '').slice(0, 200);
-        return jsonResponse(
-            { error: `Untrusted origin ${origin}: open the app at its configured URL (AUTH_URL)` },
-            403,
-        );
-    }
-    const cookies = parseCookies(request.headers.get('Cookie'));
-    const secret = resolveAuthSecret(env);
-    const valid = await verifyCsrfToken(
-        cookies[csrfCookieName(env)],
-        typeof submittedToken === 'string' ? submittedToken : undefined,
-        secret,
-    );
-    return valid ? null : jsonResponse({ error: 'Invalid or missing CSRF token' }, 403);
-}
-
 async function handleCredentialsCallback(
     request: Request,
     env: AuthEnv,
@@ -350,54 +263,7 @@ async function handleCredentialsCallback(
         return jsonResponse({ error: 'Please verify your email before signing in' }, 401);
     }
 
-    const signedIn = await completeSignIn(user, env, request, options);
-    if (!signedIn) {
-        return jsonResponse(
-            {
-                error: 'Account setup could not be completed. Please try again.',
-                code: 'ACCOUNT_PROVISIONING_FAILED',
-            },
-            500,
-        );
-    }
-
-    return jsonResponse({ success: true, session: signedIn.session }, 200, { 'Set-Cookie': signedIn.cookie });
-}
-
-/** A finished password sign-in: the session cookie to set and the client's copy of the session. */
-export interface CompletedSignIn {
-    cookie: string;
-    session: { user: CreatedSession['user']; expires: number };
-}
-
-/**
- * The tail of every password sign-in, shared by the credentials callback and the app's register
- * route (which signs the new account in itself): first-user bootstrap, the app's `onSignIn` hook,
- * then the session. Null when the account could not be finished (logged here): the caller answers
- * 500 `ACCOUNT_PROVISIONING_FAILED` and issues no session.
- */
-export async function completeSignIn(
-    user: AuthorizedUser,
-    env: AuthEnv,
-    request: Request,
-    options: CreateAuthConfigOptions = {},
-): Promise<CompletedSignIn | null> {
-    ensureOrmConnection(env);
-    try {
-        await bootstrapFirstUser(env, user);
-    } catch (error) {
-        console.error(JSON.stringify({ event: 'auth_first_user_bootstrap_failed', error: redactErrorForLog(error) }));
-        return null;
-    }
-    if (!(await runSignInHook(options, { userId: user.id, email: user.email }))) return null;
-
-    const { cookie, session } = await createSessionCookieForUser(
-        { id: user.id, email: user.email, name: user.name, image: user.image, emailVerified: user.emailVerified },
-        env,
-        request,
-        options,
-    );
-    return { cookie, session: { user: session.user, expires: session.expiresAt } };
+    return jsonForOutcome(await signInOrChallenge(user, env, request, options, 'credentials'));
 }
 
 async function handleOAuthSignIn(
@@ -629,36 +495,18 @@ async function handleOAuthCallback(
         return oauthErrorRedirect(env, options, 'Verification', request);
     }
 
-    try {
-        await bootstrapFirstUser(env, { id: userId, email: userEmail, name: userName });
-    } catch (error) {
-        console.error(`First-user account provisioning failed for OAuth provider "${providerId}":`, error);
-        return oauthErrorRedirect(env, options, 'AccountProvisioning', request);
-    }
-    if (!(await runSignInHook(options, { userId, email: userEmail }))) {
-        return oauthErrorRedirect(env, options, 'AccountProvisioning', request);
-    }
-
-    const { cookie } = await createSessionCookieForUser(
-        { id: userId, email: userEmail, name: userName, image: userImage, emailVerified: emailVerifiedAt },
-        env,
-        request,
-        options,
-    );
-
     const clearState = clearCookie(oauthStateCookieName(env), {
         secure: resolveSecureCookie(env, request),
         path: '/api/auth',
     });
-
-    return new Response(null, {
-        status: 302,
-        headers: [
-            ['Location', `${resolveFrontendUrl(env)}${statePayload.callbackUrl}`],
-            ['Set-Cookie', cookie],
-            ['Set-Cookie', clearState],
-        ],
-    });
+    const outcome = await signInOrChallenge(
+        { id: userId, email: userEmail, name: userName, image: userImage, emailVerified: emailVerifiedAt },
+        env,
+        request,
+        options,
+        'oauth',
+    );
+    return redirectForOutcome(outcome, env, options, sanitizeCallbackPath(statePayload.callbackUrl), [clearState]);
 }
 
 async function handleMagicLinkSend(
@@ -769,34 +617,20 @@ async function handleMagicLinkCallback(
         await announce(env, options, 'user.verified', { userId: String(user.get('id')), email, at: now });
     }
 
-    const userId = String(user.get('id'));
-    const userName = (user.get('name') as string | null) ?? null;
-    const userImage = user.imageUrl();
-
-    try {
-        await bootstrapFirstUser(env, { id: userId, email, name: userName });
-    } catch (error) {
-        console.error('First-user account provisioning failed during magic-link sign-in:', error);
-        return errorRedirect(env, options, 'AccountProvisioning');
-    }
-    if (!(await runSignInHook(options, { userId, email }))) {
-        return errorRedirect(env, options, 'AccountProvisioning');
-    }
-
-    const { cookie } = await createSessionCookieForUser(
-        { id: userId, email, name: userName, image: userImage, emailVerified: Date.now() },
+    const outcome = await signInOrChallenge(
+        {
+            id: String(user.get('id')),
+            email,
+            name: (user.get('name') as string | null) ?? null,
+            image: user.imageUrl(),
+            emailVerified: Date.now(),
+        },
         env,
         request,
         options,
+        'magic-link',
     );
-
-    return new Response(null, {
-        status: 302,
-        headers: [
-            ['Location', `${resolveFrontendUrl(env)}${callbackUrl}`],
-            ['Set-Cookie', cookie],
-        ],
-    });
+    return redirectForOutcome(outcome, env, options, callbackUrl);
 }
 
 async function handleSignOut(request: Request, env: AuthEnv, options: CreateAuthConfigOptions): Promise<Response> {
@@ -823,7 +657,8 @@ async function handleSignOut(request: Request, env: AuthEnv, options: CreateAuth
 
 /**
  * Handle every `/api/auth/*` request not already owned by the host app.
- * Covers: csrf, session, credentials + OAuth + magic-link sign-in, sign-out.
+ * Covers: csrf, session, credentials + OAuth + magic-link + passkey sign-in, the second-factor
+ * challenge, the signed-in person's factors (`/factors/*`), sign-out.
  */
 async function routeAuthRequest(request: Request, env: AuthEnv, options?: CreateAuthConfigOptions): Promise<Response> {
     try {
@@ -838,40 +673,45 @@ async function routeAuthRequest(request: Request, env: AuthEnv, options?: Create
         const [action, param] = segments;
 
         if (action === 'csrf' && request.method === 'GET') {
-            return handleCsrf(env, request);
+            return await handleCsrf(env, request);
         }
 
         if (action === 'session' && request.method === 'GET') {
-            return handleGetSession(request, env, resolvedOptions);
+            return await handleGetSession(request, env, resolvedOptions);
         }
 
+        // Passkeys, the second-factor challenge and the signed-in person's own factors.
+        const factorResponse = await handleFactorRequest(request, env, resolvedOptions, segments);
+        if (factorResponse) return factorResponse;
+
         if (action === 'callback' && param === 'credentials' && request.method === 'POST') {
-            return handleCredentialsCallback(request, env, resolvedOptions);
+            return await handleCredentialsCallback(request, env, resolvedOptions);
         }
 
         if (action === 'callback' && param === 'email' && request.method === 'GET') {
-            return handleMagicLinkCallback(request, env, resolvedOptions);
+            return await handleMagicLinkCallback(request, env, resolvedOptions);
         }
 
         if (action === 'callback' && param && request.method === 'GET') {
-            return handleOAuthCallback(request, env, resolvedOptions, param);
+            return await handleOAuthCallback(request, env, resolvedOptions, param);
         }
 
         if (action === 'signin' && param === 'email' && request.method === 'POST') {
-            return handleMagicLinkSend(request, env, resolvedOptions);
+            return await handleMagicLinkSend(request, env, resolvedOptions);
         }
 
         if (action === 'signin' && param && request.method === 'GET') {
-            return handleOAuthSignIn(request, env, resolvedOptions, param);
+            return await handleOAuthSignIn(request, env, resolvedOptions, param);
         }
 
         if (action === 'signout' && request.method === 'POST') {
-            return handleSignOut(request, env, resolvedOptions);
+            return await handleSignOut(request, env, resolvedOptions);
         }
 
         return jsonResponse({ error: 'Not found' }, 404);
     } catch (error) {
-        console.error('Auth request error:', error);
+        // Every handler above is awaited, so a rejection lands here rather than escaping the router.
+        console.error(JSON.stringify({ event: 'auth_request_failed', error: redactErrorForLog(error) }));
         return jsonResponse({ error: 'Authentication error' }, 500);
     }
 }

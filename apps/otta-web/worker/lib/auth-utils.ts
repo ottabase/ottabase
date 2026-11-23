@@ -10,6 +10,7 @@ import { redactErrorForLog, ServiceError } from '@ottabase/utils/http-errors';
 import { sanitizeInlineHtml, sanitizeUrl } from '@ottabase/utils/sanitize';
 import { getOttabaseConfig } from '../../ottabase/config.loader';
 import { events } from '../../ottabase/events';
+import { packages } from '../../ottabase/registry';
 import { SUPPORTED_LANGUAGES } from '../../ottabase/locale';
 import { registerAppEmailTemplates } from '../../src/email/templates';
 import { resolveAppMailer } from './email-provider';
@@ -171,6 +172,11 @@ export function getAuthOptions(env: CloudflareEnv): CreateAuthConfigOptions {
     // OAuth and magic-link accounts are created (and verified) inside @ottabase/auth, which tells
     // the bus through this. The env is this request's: the one the bus and its subscribers expect.
     options.emit = (_env, name, payload) => emitAccountEvent<keyof AuthEvents>(env, name, payload);
+
+    // Authenticator apps and passkeys carry the app's name; a package (an organization's two-factor
+    // policy) may require two-factor of a person from a date.
+    options.appName = getOttabaseConfig(env).appName;
+    options.secondFactorRequiredFrom = (_env, userId) => packages.secondFactorRequiredFrom(env, userId);
 
     return options;
 }

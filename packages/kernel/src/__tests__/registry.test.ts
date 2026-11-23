@@ -392,3 +392,35 @@ describe('runReadiness', () => {
         expect(registry.env()).toEqual({ required: ['OBCF_D1', 'TOKEN'], optional: ['PUBLIC_URL', 'OBCF_KV'] });
     });
 });
+
+describe('secondFactorRequiredFrom', () => {
+    it('is null with no contributor, and the earliest date when several answer', async () => {
+        expect(
+            await createPackageRegistry<Env>({ packages: [pkg({ key: 'plain' })] }).secondFactorRequiredFrom({}, 'u1'),
+        ).toBeNull();
+        const registry = createPackageRegistry<Env>({
+            packages: [
+                pkg({ key: 'late', auth: { secondFactorRequiredFrom: async () => 2000 } }),
+                pkg({ key: 'none', auth: { secondFactorRequiredFrom: async () => null } }),
+                pkg({
+                    key: 'early',
+                    auth: { secondFactorRequiredFrom: async (_env, userId) => (userId === 'u1' ? 1000 : null) },
+                }),
+            ],
+        });
+        expect(await registry.secondFactorRequiredFrom({}, 'u1')).toBe(1000);
+        expect(await registry.secondFactorRequiredFrom({}, 'u2')).toBe(2000);
+    });
+
+    it('throws when a contributor does, so the sign-in fails closed', async () => {
+        const registry = createPackageRegistry<Env>({
+            packages: [
+                pkg({
+                    key: 'broken',
+                    auth: { secondFactorRequiredFrom: async () => Promise.reject(new Error('down')) },
+                }),
+            ],
+        });
+        await expect(registry.secondFactorRequiredFrom({}, 'u1')).rejects.toThrow('down');
+    });
+});

@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { Authenticator } from '@ottabase/ottaorm/models';
 import { getSession, handleAuthRequest, hashPassword, verifyPassword } from '../backend-handler';
 import { verifyJwt } from '../jwt';
 import type { AuthEnv } from '../types';
+
+// These accounts have no authenticator app: a password sign-in goes straight to the session.
+vi.spyOn(Authenticator, 'hasTwoFactor').mockResolvedValue(false);
 
 function createFakeD1() {
     // None of the routes exercised in this file (csrf/session/404/missing-binding) need real

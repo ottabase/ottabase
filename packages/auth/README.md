@@ -1,8 +1,9 @@
 # @ottabase/auth
 
 Lightweight, dependency-free authentication for Ottabase apps on Cloudflare Workers + D1. Signed session cookies, PBKDF2
-credentials, generic OAuth2/OIDC, and magic-link email sign-in — all built on the Web Crypto API (`crypto.subtle`) that
-Workers implements natively. No Auth.js, no Node crypto, no third-party crypto or JWT library.
+credentials, generic OAuth2/OIDC, magic-link email sign-in, passkeys and two-factor sign-in with an authenticator app,
+all built on the Web Crypto API (`crypto.subtle`) that Workers implements natively. No Auth.js, no Node crypto, no
+third-party crypto, JWT or WebAuthn library.
 
 ## Features
 
@@ -14,6 +15,9 @@ Workers implements natively. No Auth.js, no Node crypto, no third-party crypto o
   Auth0
 - **Magic link sign-in** - Short-lived (15 min) passwordless email links, with dev-trap / SMTP / Resend senders
   auto-selected from env vars
+- **Passkeys** - WebAuthn sign-in with the device's fingerprint, face or PIN (ES256, RS256, Ed25519)
+- **Two-factor sign-in** - Authenticator-app codes (TOTP, RFC 6238) with recovery codes, asked for after every password,
+  magic-link and OAuth sign-in; a package can make it mandatory for some people (an organization policy)
 - **UI components** - Ready-to-use login/register forms built on `@ottabase/ui`
 - **Framework-agnostic client** - Plain `fetch`-based client API and a Jotai-backed React hook
 
@@ -58,16 +62,27 @@ owns. Everything else stays in the host app.
 
 ### Owned by `@ottabase/auth` (via `handleAuthRequest`)
 
-| Route                            | Method | Description                                                              |
-| -------------------------------- | ------ | ------------------------------------------------------------------------ |
-| `/api/auth/csrf`                 | GET    | Sets the CSRF cookie, returns `{ csrfToken }`                            |
-| `/api/auth/session`              | GET    | Returns the current `Session` or `null`                                  |
-| `/api/auth/callback/credentials` | POST   | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }` |
-| `/api/auth/signin/:provider`     | GET    | `?callbackUrl=` → 302 redirect to the OAuth provider                     |
-| `/api/auth/callback/:provider`   | GET    | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`  |
-| `/api/auth/signin/email`         | POST   | `{ email, csrfToken, callbackUrl }` → sends a magic link                 |
-| `/api/auth/callback/email`       | GET    | Verifies the magic-link token, creates a session, redirects              |
-| `/api/auth/signout`              | POST   | `{ csrfToken }` → revokes the current session only, clears the cookie    |
+| Route                                  | Method  | Description                                                                |
+| -------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `/api/auth/csrf`                       | GET     | Sets the CSRF cookie, returns `{ csrfToken }`                              |
+| `/api/auth/session`                    | GET     | Returns the current `Session` or `null`                                    |
+| `/api/auth/callback/credentials`       | POST    | `{ email, password, csrfToken }` → `{ success, session }` or `{ error }`   |
+| `/api/auth/signin/:provider`           | GET     | `?callbackUrl=` → 302 redirect to the OAuth provider                       |
+| `/api/auth/callback/:provider`         | GET     | Exchanges the OAuth code, creates a session, redirects to `callbackUrl`    |
+| `/api/auth/signin/email`               | POST    | `{ email, csrfToken, callbackUrl }` → sends a magic link                   |
+| `/api/auth/callback/email`             | GET     | Verifies the magic-link token, creates a session, redirects                |
+| `/api/auth/signout`                    | POST    | `{ csrfToken }` → revokes the current session only, clears the cookie      |
+| `/api/auth/passkey/options`            | POST    | Sign-in options for a passkey (a single-use challenge)                     |
+| `/api/auth/callback/passkey`           | POST    | `{ credential, csrfToken }` → `{ success, session }`                       |
+| `/api/auth/two-factor/challenge`       | GET     | `{ pending, passkey, recoveryCodes }`: is a sign-in waiting on a code?     |
+| `/api/auth/two-factor/challenge`       | POST    | `{ code }` or `{ recoveryCode }` or `{ passkey }` → `{ success, session }` |
+| `/api/auth/two-factor/passkey-options` | POST    | Options to finish a waiting sign-in with a passkey                         |
+| `/api/auth/factors/*`                  | various | The signed-in person's authenticator app and passkeys (below)              |
+
+With an authenticator app on the account, the credentials callback answers
+`200 { success: false, twoFactorRequired: true }` and sets a pending cookie instead of the session; OAuth and magic-link
+callbacks redirect to the second-factor page (`twoFactorPage`, default `/login/two-factor`) instead of `callbackUrl`.
+See "Two-factor sign-in and passkeys".
 
 `callbackUrl` must be a relative path (`/profile`). A missing or off-site one falls back to `/`, which is also where the
 client helpers send the user when `redirectTo` is omitted.
@@ -157,10 +172,11 @@ throttle it; a throw is swallowed and never fails the session read. otta-web use
 The handler announces the accounts it creates and verifies through `emit`, which the app wires to its event bus (the
 package never imports one). A throw from `emit` is logged and never fails the sign-in.
 
-| Event           | Payload (`UserCreatedEvent`, `UserVerifiedEvent`)            | When                                                                                                                              |
-| --------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `user.created`  | `{ userId, email, name, organizationId: null, method, at }`  | An OAuth first sign-in (`method: 'oauth'`, after the identity link) or a magic link that creates the account (`'magic-link'`)     |
-| `user.verified` | `{ userId, email, at }` (`at` is the stored `emailVerified`) | `emailVerified` goes from null to a time: an account created verified, a magic link, an OAuth provider that vouches for the email |
+| Event                 | Payload (`UserCreatedEvent`, `UserVerifiedEvent`)            | When                                                                                                                              |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `user.created`        | `{ userId, email, name, organizationId: null, method, at }`  | An OAuth first sign-in (`method: 'oauth'`, after the identity link) or a magic link that creates the account (`'magic-link'`)     |
+| `user.verified`       | `{ userId, email, at }` (`at` is the stored `emailVerified`) | `emailVerified` goes from null to a time: an account created verified, a magic link, an OAuth provider that vouches for the email |
+| `user.factor.changed` | `{ userId, factor, change, at }` (`UserFactorChangedEvent`)  | An authenticator app or passkey added or removed, recovery codes regenerated or one used: for an audit trail or a security email  |
 
 `organizationId` is null because the workspace comes later, from `onSignIn`. Accounts the host app creates itself
 (credentials sign-up, a bootstrap owner, Pro SSO) and its own verify-email route emit the same events from the app, with
@@ -182,6 +198,65 @@ export function authOptions(env: CloudflareEnv): CreateAuthConfigOptions {
 
 otta-web wires it in `getAuthOptions` (`worker/lib/auth-utils.ts`) through `emitAccountEvent`, which also sets the
 event's actor and swallows a bus failure.
+
+## Two-factor sign-in and passkeys
+
+Both live in one table, `authenticators` (core, from `@ottabase/ottaorm`: list `authenticatorsTable` with the core
+tables and `Authenticator` with the core models). Generic CRUD never serves it.
+
+**One gate.** Password, magic-link and OAuth sign-ins all end in `signInOrChallenge` (`src/sign-in.ts`). An account with
+a confirmed authenticator app gets a 10-minute pending cookie (`ottabase.<APP_ID>.second-factor`, `Path=/api/auth`)
+instead of a session, and `POST /two-factor/challenge` issues the session once a code, a recovery code or one of the
+person's passkeys checks out. A passkey sign-in with user verification is two factors already and never gets the
+challenge. Sessions minted outside a sign-in (the password-change reissue, the first-run owner, SSO through an identity
+provider, which owns its MFA) are not challenged.
+
+**Authenticator app (TOTP).** RFC 6238, SHA-1, six digits, 30 seconds, one step of drift either way. The secret is
+sealed with AES-GCM under a key derived from `AUTH_SECRET`; each accepted step is stored, so a code works once. Turning
+it on hands out ten recovery codes, shown once and stored hashed as single-use `verification_tokens` rows. Five wrong
+codes in fifteen minutes and the challenge answers 429 (counted per person in KV).
+
+**Passkeys.** WebAuthn with attestation `none`: ES256, RS256 and Ed25519 keys kept as JWKs, user verification required,
+discoverable credentials, a signature counter that may not go backwards. The relying party is the host of `AUTH_URL` and
+the origin its origin, never the request's. Browsers refuse an IP address as a relying party, so passkeys need the app
+at a domain over https, or at `localhost` in development (`AUTH_URL=http://localhost:3003`, not `127.0.0.1`);
+`passkeysAvailable(env)` says which, and the login config carries it.
+
+**Changing factors needs a recent sign-in.** Every write under `/factors` requires a session under 15 minutes old
+(`RECENT_SIGN_IN_MS`), else `403 REAUTH_REQUIRED`: a stolen cookie cannot add its own passkey or turn the app off.
+
+| Route                                | Method        | Body / answer                                              |
+| ------------------------------------ | ------------- | ---------------------------------------------------------- |
+| `/api/auth/factors`                  | GET           | `{ twoFactor, passkeys, passkeysAvailable, recentSignIn }` |
+| `/api/auth/factors/totp`             | POST          | → `{ secret, uri }` (show `uri` as a QR code)              |
+| `/api/auth/factors/totp/confirm`     | POST          | `{ code }` → `{ recoveryCodes }`                           |
+| `/api/auth/factors/totp`             | DELETE        | turns it off, recovery codes with it                       |
+| `/api/auth/factors/recovery-codes`   | POST          | → a fresh `{ recoveryCodes }`                              |
+| `/api/auth/factors/passkeys/options` | POST          | creation options for `navigator.credentials.create`        |
+| `/api/auth/factors/passkeys`         | POST          | `{ credential, name }` → `{ passkey }`                     |
+| `/api/auth/factors/passkeys/:id`     | PATCH, DELETE | `{ name }` / remove (the caller's own only)                |
+
+The browser side is in `@ottabase/auth/client`: `signInWithPasskey`, `getTwoFactorChallenge`, `submitTwoFactor`,
+`getFactors`, `startTotpSetup`, `confirmTotpSetup`, `disableTotp`, `regenerateRecoveryCodes`, `addPasskey`,
+`renamePasskey`, `removePasskey`, `isPasskeySupported`. otta-web's pages are `/login/two-factor` and `/security`.
+
+```typescript
+import { signInWithCredentials } from '@ottabase/auth/client';
+
+const result = await signInWithCredentials({ email, password });
+if (result.twoFactorRequired) navigate({ to: '/login/two-factor', search: { callbackUrl: '/dashboard' } });
+```
+
+**Resetting it for someone else.** `resetTwoFactor(userId, env, options)` from `@ottabase/auth/backend` removes a
+person's authenticator app and recovery codes and refreshes their sessions, for an administrator helping a member who
+lost their phone. It checks nothing: the caller decides who may do it.
+
+**Requiring it.** `secondFactorRequiredFrom(env, userId)` returns the time from which a person must have two-factor on
+(or null). It is read when the session snapshot is built; bump the person's profile version (`bumpProfileVersion`) when
+the answer changes. Once the time passes, `getSession` returns null for that person's session everywhere except
+`/api/auth/*`, and the session read carries `twoFactorSetupRequired: true` so the app shows its setup page. A throw
+fails the sign-in closed. Apps built on Ottabase wire it from the package registry (`auth.secondFactorRequiredFrom` on a
+manifest), so an organization policy package needs no auth code.
 
 ## Session Model
 

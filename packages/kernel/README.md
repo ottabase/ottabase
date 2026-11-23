@@ -73,10 +73,15 @@ export const notesPackage = definePackage<CloudflareEnv>({
 | `health`          | Probed by `/api/health`                                                            |
 | `lifecycle`       | `onInstall` / `onUpgrade` run from the init route, versions recorded in KV         |
 | `errors`          | `report(incident)` receives every unhandled error the host hands to the registry   |
+| `auth`            | `secondFactorRequiredFrom(env, userId)`: when this person must have two-factor on  |
 
 `registry.report(incident)` fans an incident out to every `errors` reporter and never rejects. A request boundary passes
 `waitUntil` and does not wait; a scheduled task or queue batch has no `waitUntil` and must `await` it, or the reports
 die with the handler.
+
+`registry.secondFactorRequiredFrom(env, userId)` asks every `auth` contributor and returns the earliest date, or null.
+The host passes it to `@ottabase/auth` as `secondFactorRequiredFrom`; a contributor that throws makes the call throw, so
+the sign-in fails closed rather than skipping a policy.
 
 Cron handler names and queue job types are app-wide. Namespace them (`notes:purge`); the registry throws on a clash.
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_AUTH_REDIRECT, rememberReturnPath, resolveAuthRedirect } from '../auth-redirect';
+import { DEFAULT_AUTH_REDIRECT, rememberReturnPath, resolveAuthRedirect, safeAuthRedirect } from '../auth-redirect';
 
 // Where login and registration send the person: the page they were stopped at, once, else their profile.
 const visit = (path: string) => window.history.replaceState(null, '', path);
@@ -50,6 +50,23 @@ describe('the post-auth redirect', () => {
         for (const target of ['https://evil.example', '//evil.example', '/\\evil.example', 'evil.example']) {
             sessionStorage.setItem('ottabase.auth.returnTo', target);
             expect(resolveAuthRedirect(), target).toBe('/profile');
+        }
+    });
+});
+
+describe('safeAuthRedirect (the second-factor page callbackUrl)', () => {
+    it('keeps a local path and falls back to the profile for anything else', () => {
+        expect(safeAuthRedirect('/admin/users?page=2')).toBe('/admin/users?page=2');
+        for (const unsafe of [
+            null,
+            '',
+            'https://evil.example',
+            '//evil.example',
+            '/\\evil.example',
+            '/login',
+            '/login/two-factor',
+        ]) {
+            expect(safeAuthRedirect(unsafe)).toBe('/profile');
         }
     });
 });

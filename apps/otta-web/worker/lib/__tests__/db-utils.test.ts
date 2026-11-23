@@ -45,6 +45,7 @@ vi.mock('@ottabase/ottaorm', () => ({
 
 vi.mock('@ottabase/ottaorm/models', () => ({
     Account: class Account {},
+    Authenticator: class Authenticator {},
     Media: class Media {},
     Organization: class Organization {},
     OrganizationMember: class OrganizationMember {},
@@ -107,7 +108,7 @@ describe('ensureDbConnection', () => {
 
         const registered = mockRegisterModels.mock.calls[0][0] as Array<{ name: string }>;
         const names = registered.map((model) => model.name);
-        expect(names.slice(0, 2)).toEqual(['Account', 'Media']);
+        expect(names.slice(0, 3)).toEqual(['Account', 'Authenticator', 'Media']);
         expect(names.at(-1)).toBe('PackageModel');
     });
 

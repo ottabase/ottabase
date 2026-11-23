@@ -158,6 +158,34 @@ export class VerificationToken extends BaseModel {
         return Array.isArray(deleted) ? deleted.length : 0;
     }
 
+    /** How many tokens an identifier holds (the recovery codes a person has left). */
+    static async countByIdentifier(identifier: string): Promise<number> {
+        const db = this.getDriver().getDb();
+        const rows = await db
+            .select({ token: verificationTokensTable.token })
+            .from(verificationTokensTable)
+            .where(eq(verificationTokensTable.identifier, identifier));
+        return Array.isArray(rows) ? rows.length : 0;
+    }
+
+    /**
+     * Delete one identifier's expired tokens. Cheap housekeeping for identifiers anyone can add
+     * rows under (passkey sign-in challenges), run each time a new one is issued.
+     */
+    static async deleteExpiredFor(identifier: string): Promise<number> {
+        const db = this.getDriver().getDb();
+        const deleted = await db
+            .delete(verificationTokensTable)
+            .where(
+                and(
+                    eq(verificationTokensTable.identifier, identifier),
+                    lt(verificationTokensTable.expires, Date.now()),
+                ),
+            )
+            .returning();
+        return Array.isArray(deleted) ? deleted.length : 0;
+    }
+
     /**
      * Delete expired tokens for cleanup
      */

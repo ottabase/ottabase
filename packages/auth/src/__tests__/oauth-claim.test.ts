@@ -22,6 +22,7 @@ vi.mock('@ottabase/ottaorm/models', () => ({
     User: { first: m.userFirst, find: m.userFind, create: m.userCreate, update: m.userUpdate, delete: m.userDelete },
     Account: { first: m.accountFirst, create: m.accountCreate },
     VerificationToken: { consumeByIdentifierAndToken: vi.fn() },
+    Authenticator: { hasTwoFactor: async () => false },
 }));
 vi.mock('../bootstrap', () => ({
     bootstrapFirstUser: vi.fn(async () => ({ isPlatformOwner: false, organizationId: null })),

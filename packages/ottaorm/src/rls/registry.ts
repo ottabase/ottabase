@@ -166,6 +166,15 @@ export const MODEL_POLICIES: ModelRLSConfig[] = [
         auditEnabled: false,
     },
 
+    {
+        // Passkey public keys and sealed authenticator-app secrets. Same stance as
+        // verification_tokens: @ottabase/auth reads and writes them through the model's own
+        // query-builder methods, so RLS/CRUD access is denied outright.
+        model: 'authenticators',
+        policy: { level: 'custom', readOnly: true, filter: () => null },
+        auditEnabled: false,
+    },
+
     // ========================================
     // ADMIN-ONLY MODELS
     // ========================================

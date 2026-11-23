@@ -91,6 +91,15 @@ export function createPackageRegistry<Env = unknown>(options: PackageRegistryOpt
         return Promise.all(outcomes).then(() => undefined);
     };
 
+    const secondFactorSources = packages.flatMap((pkg) =>
+        pkg.auth?.secondFactorRequiredFrom ? [pkg.auth.secondFactorRequiredFrom] : [],
+    );
+    const secondFactorRequiredFrom = async (env: Env, userId: string): Promise<number | null> => {
+        const answers = await Promise.all(secondFactorSources.map((source) => source(env, userId)));
+        const dates = answers.filter((at): at is number => typeof at === 'number' && Number.isFinite(at));
+        return dates.length > 0 ? Math.min(...dates) : null;
+    };
+
     return {
         packages,
         has: (key) => byKey.has(key),
@@ -139,5 +148,6 @@ export function createPackageRegistry<Env = unknown>(options: PackageRegistryOpt
                 })),
             ]),
         report,
+        secondFactorRequiredFrom,
     };
 }

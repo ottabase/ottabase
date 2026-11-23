@@ -9,6 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **Passkeys and two-factor sign-in, in `@ottabase/auth`.** Passkeys (WebAuthn: ES256, RS256 and Ed25519, user
+  verification required, attestation `none`) sign in without a password or a code. An authenticator app (TOTP, RFC 6238)
+  adds a code after every password, magic-link and OAuth sign-in, with ten single-use recovery codes. Web Crypto only,
+  no new dependency in the package. One table, `authenticators` (core, denied to generic CRUD); TOTP secrets sealed with
+  a key derived from `AUTH_SECRET`; five wrong codes in fifteen minutes answer 429; changing a factor needs a sign-in
+  under fifteen minutes old. otta-web gets `/login/two-factor`, `/security` (QR code, recovery codes, passkeys) and a
+  passkey button on the login page; the `user.factor.changed` event goes on the bus. Passkeys need the app at a domain
+  or `localhost`, never an IP address.
+- **A package can require two-factor sign-in.** `auth.secondFactorRequiredFrom(env, userId)` on a kernel manifest
+  returns the time from which a person must have it on. Past that time their session reaches `/api/auth/*` only and the
+  app keeps them on `/security` until it is on.
 - **`@ottabase/ui` hooks and CopyButton.** `@ottabase/ui/hooks` (also in the barrel): `useClipboard`, `useClickOutside`,
   `useDebouncedValue`/`useDebouncedCallback`, `useLocalStorage` (JSON, synced across hooks and tabs) with
   `getStorageValue`/`setStorageValue`, `useHotkeys` with `parseShortcut`, `useMediaQuery`, `useReducedMotion`,
@@ -778,6 +789,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed (Unreleased)
 
+- **`@ottabase/auth`: a failing sign-in handler escaped the router's catch.** `handleAuthRequest` returned each
+  handler's promise from inside its `try` without awaiting it, so a thrown error (a database outage mid sign-in)
+  rejected past the generic 500 and its redacted log. Every handler is awaited now.
 - `pnpm install` works on pnpm 11 and later. They no longer read the `pnpm` field of package.json, so the list of
   dependencies allowed to run install scripts (esbuild, workerd, sharp, @swc/core, unrs-resolver) was ignored and the
   install stopped with `ERR_PNPM_IGNORED_BUILDS`. The list is `allowBuilds` in `pnpm-workspace.yaml` now, which pnpm

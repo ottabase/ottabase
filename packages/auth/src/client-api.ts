@@ -57,6 +57,11 @@ export interface AuthResponse {
     error?: string;
     session?: AuthSession;
     url?: string;
+    /**
+     * The password was right and the account has an authenticator app: no session yet. Send the
+     * person to the second-factor page, which finishes with `submitTwoFactor`.
+     */
+    twoFactorRequired?: boolean;
 }
 
 export interface RegisterResponse {
@@ -173,6 +178,10 @@ export async function signInWithCredentials(
         });
 
         const data = await readJsonSafe(response);
+
+        if (response.ok && data?.twoFactorRequired === true) {
+            return { success: false, twoFactorRequired: true, error: data.error };
+        }
 
         if (!response.ok || !data?.success) {
             return { success: false, error: data?.error || 'Invalid credentials' };
@@ -514,3 +523,25 @@ export async function changePassword(
         return { success: false, error: error instanceof Error ? error.message : 'Password change failed' };
     }
 }
+
+// Passkeys, the second-factor challenge and the person's own factors.
+export {
+    addPasskey,
+    confirmTotpSetup,
+    disableTotp,
+    getFactors,
+    getTwoFactorChallenge,
+    isPasskeyCancelled,
+    isPasskeySupported,
+    regenerateRecoveryCodes,
+    removePasskey,
+    renamePasskey,
+    signInWithPasskey,
+    startTotpSetup,
+    submitTwoFactor,
+    type FactorResult,
+    type FactorSignInResult,
+    type FactorSummary,
+    type PasskeySummary,
+    type TwoFactorChallengeState,
+} from './client-factors';

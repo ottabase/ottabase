@@ -6,6 +6,7 @@ import {
     handleAuthRequest,
     hashPassword,
     hashToken,
+    passkeysAvailable,
     requestLocaleDefaults,
     requireCsrf,
     revokeAllUserSessions,
@@ -93,6 +94,8 @@ export function handleAuthConfig(context: AuthRouteContext): Response {
         {
             ...config,
             authSecretConfigured: !!env.AUTH_SECRET,
+            // A domain over https, or localhost: browsers refuse passkeys at an IP address.
+            passkeys: passkeysAvailable(env as any),
         },
         200,
     );
@@ -977,6 +980,13 @@ export async function handleAuthApiRequest(context: AuthRouteContext): Promise<R
             bucket = 'magiclink';
         } else if (url.pathname.includes('/signout')) {
             bucket = 'signout';
+        } else if (url.pathname.includes('/callback/passkey') || url.pathname.includes('/passkey/options')) {
+            // Passkey sign-in: a signature, not a guess, but each options call stores a challenge.
+            bucket = 'passkey';
+        } else if (url.pathname.includes('/two-factor/')) {
+            // The second step of a sign-in that already passed the bot check. The package also
+            // caps wrong codes per account; this caps them per IP across accounts.
+            bucket = 'two-factor';
         }
 
         if (bucket) {

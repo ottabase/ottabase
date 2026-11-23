@@ -1,5 +1,5 @@
 // Auth routes that should never be redirect targets
-const AUTH_ROUTE_PATHS = new Set(['/login', '/register', '/verify-email', '/reset-password']);
+const AUTH_ROUTE_PATHS = new Set(['/login', '/login/two-factor', '/register', '/verify-email', '/reset-password']);
 
 const RETURN_PATH_KEY = 'ottabase.auth.returnTo';
 export const DEFAULT_AUTH_REDIRECT = '/profile';
@@ -63,4 +63,9 @@ function consumeReturnPath(): string | null {
 export function resolveAuthRedirect(): string {
     if (typeof window === 'undefined') return DEFAULT_AUTH_REDIRECT;
     return consumeReturnPath() || DEFAULT_AUTH_REDIRECT;
+}
+
+/** A redirect target taken from a URL (the second-factor page's `callbackUrl`): local only, else the default. */
+export function safeAuthRedirect(path: string | null): string {
+    return normalizeRedirectTarget(path) ?? DEFAULT_AUTH_REDIRECT;
 }

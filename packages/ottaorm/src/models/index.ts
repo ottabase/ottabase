@@ -9,6 +9,13 @@ export { User, usersTable, type NewUserType, type UserType } from './User';
 
 // Auth models
 export {
+    Authenticator,
+    authenticatorsTable,
+    type AuthenticatorKind,
+    type AuthenticatorType,
+    type NewAuthenticatorType,
+} from './Authenticator';
+export {
     VerificationToken,
     verificationTokensTable,
     type NewVerificationTokenType,

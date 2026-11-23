@@ -140,6 +140,7 @@ export type { DomainValidationErrorOptions, NormalizedValidationFailure, Validat
 export {
     Account,
     AuditLog,
+    Authenticator,
     // Media (core — tracks all uploaded files)
     Media,
     mediaFileStore,
@@ -157,6 +158,7 @@ export {
     VerificationToken,
     accountsTable,
     auditLogsTable,
+    authenticatorsTable,
     mediaTable,
     organizationMembersTable,
     organizationsTable,
@@ -173,11 +175,14 @@ export {
 export type {
     AccountType,
     AuditLogType,
+    AuthenticatorKind,
+    AuthenticatorType,
     MediaRecord,
     MediaType,
     MediaVariantInfo,
     NewAccountType,
     NewAuditLogType,
+    NewAuthenticatorType,
     NewMediaType,
     NewOrganizationMemberType,
     NewOrganizationType,

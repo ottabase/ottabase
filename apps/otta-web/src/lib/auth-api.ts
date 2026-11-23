@@ -8,6 +8,20 @@
 // ============================================================
 
 export {
+    addPasskey,
+    confirmTotpSetup,
+    disableTotp,
+    getFactors,
+    getTwoFactorChallenge,
+    isPasskeySupported,
+    regenerateRecoveryCodes,
+    removePasskey,
+    renamePasskey,
+    signInWithPasskey,
+    startTotpSetup,
+    submitTwoFactor,
+    type FactorSummary,
+    type PasskeySummary,
     changePassword,
     getCsrfToken,
     getSession,

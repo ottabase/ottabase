@@ -10,6 +10,7 @@ import {
 } from '@ottabase/ottaorm';
 import {
     Account,
+    Authenticator,
     Media,
     Organization,
     OrganizationMember,
@@ -81,6 +82,7 @@ export async function checkMigrationAuth(
 function registerAppModels(): void {
     const coreModels = [
         Account,
+        Authenticator,
         Media,
         VerificationToken,
         ScheduledTask,

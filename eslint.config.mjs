@@ -326,7 +326,6 @@ export default [
         // Fix: return errorResponse(...) / jsonResponse(...) from @ottabase/utils.
         files: [
             'packages/analytics/src/server.ts',
-            'packages/auth/src/backend-handler.ts',
             'packages/cf-realtime/src/server/RealtimeActor.ts',
             'packages/ottaai/src/ottaorm/handlers.ts',
             'packages/ottaorm/src/crud/index.ts',

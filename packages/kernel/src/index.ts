@@ -17,6 +17,7 @@ export { mountPackages } from './mount';
 export { createPackageRegistry, type PackageRegistryOptions } from './registry';
 export type {
     Awaitable,
+    AuthContribution,
     CronContribution,
     EnvContribution,
     EnvDeclaration,

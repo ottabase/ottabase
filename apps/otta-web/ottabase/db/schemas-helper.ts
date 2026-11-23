@@ -6,6 +6,7 @@
 
 import {
     accountsTable,
+    authenticatorsTable,
     auditLogsTable,
     mediaTable,
     organizationMembersTable,
@@ -24,6 +25,7 @@ import { packages } from '../packages';
 
 const coreTables = {
     accountsTable,
+    authenticatorsTable,
     mediaTable,
     tagsTable,
     usersTable,

@@ -1,7 +1,14 @@
 import { useNotice } from '@/components/UrlNotices';
 import { APP_META } from '@/ottabase/config';
 import { useSession } from '@/lib/auth';
-import { requestPasswordReset, sendMagicLink, signInWithCredentials, signInWithProvider } from '@/lib/auth-api';
+import {
+    isPasskeySupported,
+    requestPasswordReset,
+    sendMagicLink,
+    signInWithCredentials,
+    signInWithPasskey,
+    signInWithProvider,
+} from '@/lib/auth-api';
 import { rememberReturnPath, resolveAuthRedirect } from '@/lib/auth-redirect';
 import { getLoginConfig } from '@ottabase/auth/config';
 import { LoginForm } from '@ottabase/auth/components';
@@ -23,7 +30,7 @@ import {
 } from '@ottabase/ui';
 import { useTurnstile } from '@ottabase/ui/turnstile';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { TURNSTILE_ACTIONS } from '../../../ottabase/turnstile';
 
@@ -51,7 +58,7 @@ export function LoginPage() {
             ({
                 ...getLoginConfig({} as any),
                 authSecretConfigured: false,
-            }) as ReturnType<typeof getLoginConfig> & { authSecretConfigured: boolean },
+            }) as ReturnType<typeof getLoginConfig> & { authSecretConfigured: boolean; passkeys?: boolean },
     );
     // Redirects arrive as `?notice=<code>` (email-verified, password-changed, auth.* failures).
     // The page claims the inline codes: successes render as a banner, failures as the form error.
@@ -70,6 +77,7 @@ export function LoginPage() {
                 if (!response.ok) return;
                 const config = (await response.json()) as ReturnType<typeof getLoginConfig> & {
                     authSecretConfigured: boolean;
+                    passkeys?: boolean;
                 };
                 if (mounted) setLoginConfig(config);
             } catch {
@@ -169,6 +177,13 @@ export function LoginPage() {
                 { redirect: false, headers: await human.headers() },
             );
 
+            if (result.twoFactorRequired) {
+                // Right password, and the account has an authenticator app: the code comes next.
+                hasNavigated.current = true;
+                navigate({ to: '/login/two-factor', search: { callbackUrl: redirectTarget.current } as never });
+                return;
+            }
+
             if (!result.success) {
                 setError(result.error || 'Invalid credentials');
                 setIsLoading(false);
@@ -185,6 +200,20 @@ export function LoginPage() {
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Login failed');
             setIsLoading(false);
+        }
+    };
+
+    const handlePasskeyLogin = async () => {
+        setIsLoading(true);
+        setError(undefined);
+        const result = await signInWithPasskey();
+        setIsLoading(false);
+        if (result.success && result.session) {
+            login(result.session);
+            hasNavigated.current = true;
+            navigate({ to: redirectTarget.current, replace: true });
+        } else if (!result.cancelled) {
+            setError(result.error || 'That passkey could not sign you in.');
         }
     };
 
@@ -299,6 +328,18 @@ export function LoginPage() {
                         navigate({ to: '/register' });
                     }}
                 />
+
+                {loginConfig.passkeys && isPasskeySupported() && (
+                    <Button
+                        variant="outline"
+                        className="w-full"
+                        disabled={isLoading}
+                        onClick={() => void handlePasskeyLogin()}
+                    >
+                        <KeyRound className="h-4 w-4" />
+                        Sign in with a passkey
+                    </Button>
+                )}
 
                 {/* Sign Up Link */}
                 <div className="rounded-xl bg-muted/40 p-4 text-center text-sm text-muted-foreground">

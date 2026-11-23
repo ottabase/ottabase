@@ -135,6 +135,7 @@
         "react-hook-form": "catalog:",
         "sonner": "catalog:",
         "three": "catalog:",
+        "uqr": "0.1.2",
         "zod": "catalog:"
     },
     "devDependencies": {

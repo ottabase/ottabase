@@ -8,6 +8,10 @@ vi.mock('../bootstrap', () => ({
     provisionPlatformOwnerOrganization: vi.fn(),
 }));
 
+// No authenticator app on this account: the sign-in goes straight to the session.
+const { Authenticator } = await import('@ottabase/ottaorm/models');
+vi.spyOn(Authenticator, 'hasTwoFactor').mockResolvedValue(false);
+
 const { completeSignIn, handleAuthRequest } = await import('../backend-handler');
 
 function createEnv(): AuthEnv {

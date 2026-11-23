@@ -100,6 +100,19 @@ export interface ErrorContribution<Env = unknown> {
 }
 
 /**
+ * What a package adds to sign-in. The host hands the combined answer to `@ottabase/auth`
+ * (`CreateAuthConfigOptions.secondFactorRequiredFrom`).
+ */
+export interface AuthContribution<Env = unknown> {
+    /**
+     * Epoch ms from which this person must have two-factor sign-in on (an organization policy),
+     * or null. Called when a session snapshot is built, so keep it to one or two reads, and bump
+     * the person's profile version when the answer changes. A throw fails that sign-in closed.
+     */
+    secondFactorRequiredFrom?: (env: Env, userId: string) => Promise<number | null>;
+}
+
+/**
  * One env key a package reads. A plain string means `{ key, secret: true, kind: 'var' }`: showing
  * a value in the admin readiness view is opt-in (`secret: false`), never the default.
  */
@@ -225,6 +238,8 @@ export interface OttaPackage<Env = unknown> {
     lifecycle?: LifecycleHooks<Env>;
     /** Observe unhandled errors the host reports through `registry.report()`. */
     errors?: ErrorContribution<Env>;
+    /** Sign-in requirements (an organization's two-factor policy). */
+    auth?: AuthContribution<Env>;
 
     /**
      * Set by `@ottabase/premium`. The kernel collects EVERYTHING from a premium package
@@ -273,6 +288,11 @@ export interface PackageRegistry<Env = unknown> {
      * with the handler.
      */
     report(incident: ErrorIncident<Env>): Promise<void>;
+    /**
+     * The earliest date any package requires two-factor of this person from, or null. Every
+     * contributor is asked; one that throws makes this throw, so the sign-in fails closed.
+     */
+    secondFactorRequiredFrom(env: Env, userId: string): Promise<number | null>;
 }
 
 export interface HealthReport {

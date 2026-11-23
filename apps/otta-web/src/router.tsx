@@ -3,6 +3,7 @@ import { DemoBanner } from '@/components/DemoBanner'; // otta:only demo
 import { NotFoundPage } from '@/components/NotFoundPage';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { RouteLoadingFallback } from '@/components/RouteLoadingFallback';
+import { TwoFactorSetupGate } from '@/components/TwoFactorSetupGate';
 import { UrlNotices } from '@/components/UrlNotices';
 import { usePageViewTracking } from '@/hooks/usePageViewTracking';
 import { ConfigurableLayout } from '@/ottabase/components/ConfigurableLayout';
@@ -41,6 +42,7 @@ function RootLayout() {
         <>
             <BrandPathSync pathname={pathname} />
             <UrlNotices />
+            <TwoFactorSetupGate pathname={pathname} />
             {/* otta:begin demo */}
             <DemoBanner />
             {/* otta:end demo */}
@@ -244,6 +246,9 @@ const layoutPreviewRoute = publicRoute('/layout-preview/$preset', () =>
 const loginRoute = publicRoute('/login', () =>
     import('@/pages/auth/LoginPage').then((m) => ({ default: m.LoginPage })),
 );
+const twoFactorRoute = publicRoute('/login/two-factor', () =>
+    import('@/pages/auth/TwoFactorPage').then((m) => ({ default: m.TwoFactorPage })),
+);
 const registerRoute = publicRoute('/register', () =>
     import('@/pages/auth/RegisterPage').then((m) => ({ default: m.RegisterPage })),
 );
@@ -258,6 +263,7 @@ const resetPasswordRoute = publicRoute('/reset-password', () =>
 
 const userProfileRoute = protectedRoute('/profile', () => import('@/pages/user/UserProfilePage'), 'UserProfilePage');
 const userSessionsRoute = protectedRoute('/sessions', () => import('@/pages/user/SessionsPage'), 'SessionsPage');
+const userSecurityRoute = protectedRoute('/security', () => import('@/pages/user/SecurityPage'), 'SecurityPage');
 const userMediaLibraryRoute = protectedRoute(
     '/media-library',
     () => import('@/pages/user/UserMediaLibraryPage'),
@@ -842,11 +848,13 @@ const coreRoutes = [
     changelogListRoute, // otta:only ottablog
     changelogDetailRoute, // otta:only ottablog
     loginRoute,
+    twoFactorRoute,
     registerRoute,
     verifyEmailRoute,
     resetPasswordRoute,
     userProfileRoute,
     userSessionsRoute,
+    userSecurityRoute,
     // Admin
     adminRoute,
     adminAnalyticsRoute,

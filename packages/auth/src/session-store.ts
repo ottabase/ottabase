@@ -33,7 +33,7 @@ import { userKey } from '@ottabase/cf/cache-keys';
 import { hmacSign } from './crypto';
 import { describeRequestDevice, type SessionDevice } from './device';
 import { registerConnection } from '@ottabase/ottaorm';
-import { OrganizationMember, PLATFORM_ADMIN_PERMISSION, User } from '@ottabase/ottaorm/models';
+import { Authenticator, OrganizationMember, PLATFORM_ADMIN_PERMISSION, User } from '@ottabase/ottaorm/models';
 import { hasGrantedPermission } from '@ottabase/utils/permissions';
 import { SYSTEM_ORGANIZATION_ID, parseBooleanFlag } from './bootstrap';
 import { clearCookie, isHttpsRequest, parseCookies, serializeCookie } from './cookies';
@@ -79,7 +79,10 @@ export function resolveSecureCookie(env: AuthEnv, request: Request): boolean {
  * else `ottabase.<kind>`. Cookies ignore the port, so two apps on one host (every app on 127.0.0.1 in dev) would
  * otherwise overwrite each other's session, CSRF and OAuth-state cookies.
  */
-export function authCookieBase(env: AuthEnv, kind: 'session-token' | 'csrf-token' | 'oauth-state'): string {
+export function authCookieBase(
+    env: AuthEnv,
+    kind: 'session-token' | 'csrf-token' | 'oauth-state' | 'second-factor',
+): string {
     const appId = env.APP_ID?.trim();
     return appId && /^[a-z0-9][a-z0-9-]*$/i.test(appId) ? `ottabase.${appId}.${kind}` : `ottabase.${kind}`;
 }
@@ -171,6 +174,10 @@ interface UserContext {
     /** The person's formatting preferences, so emails, digests and cron can format without a D1 read. */
     timezone: string | null;
     locale: string | null;
+    /** An authenticator app is confirmed: password, magic-link and OAuth sign-ins ask for a code. */
+    twoFactor: boolean;
+    /** Epoch ms from which a policy (`secondFactorRequiredFrom`) requires two-factor; null when none does. */
+    twoFactorRequiredFrom: number | null;
 }
 
 /**
@@ -198,9 +205,34 @@ interface RegistrySnapshot {
     emailVerified: number | null;
     timezone: string | null;
     locale: string | null;
+    twoFactor: boolean;
+    twoFactorRequiredFrom: number | null;
 }
 
-async function loadUserContext(userId: string, env: AuthEnv): Promise<UserContext> {
+/**
+ * Two-factor state for the snapshot. The policy hook's failure propagates: a sign-in then fails
+ * closed, and a stale snapshot keeps its previous value (refreshSnapshotIfStale) rather than
+ * dropping a requirement because a lookup failed once.
+ */
+async function loadTwoFactorState(
+    userId: string,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<{ twoFactor: boolean; twoFactorRequiredFrom: number | null }> {
+    let twoFactor = false;
+    try {
+        twoFactor = await Authenticator.hasTwoFactor(userId);
+    } catch {
+        // The authenticators table may not exist yet (pre-migration): nobody has a factor then.
+    }
+    const requiredFrom = options?.secondFactorRequiredFrom ? await options.secondFactorRequiredFrom(env, userId) : null;
+    return {
+        twoFactor,
+        twoFactorRequiredFrom: typeof requiredFrom === 'number' && Number.isFinite(requiredFrom) ? requiredFrom : null,
+    };
+}
+
+async function loadUserContext(userId: string, env: AuthEnv, options?: CreateAuthConfigOptions): Promise<UserContext> {
     ensureOrmConnection(env);
 
     // Load the user once up front; reused below for roles/createdAt and for the persisted
@@ -325,6 +357,7 @@ async function loadUserContext(userId: string, env: AuthEnv): Promise<UserContex
         emailVerified,
         timezone,
         locale,
+        ...(await loadTwoFactorState(userId, env, options)),
     };
 }
 
@@ -416,7 +449,7 @@ export async function createSessionForUser(
         throw new Error('Session store (OBCF_KV) is not bound; cannot create a session');
     }
 
-    const context = await loadUserContext(input.id, env);
+    const context = await loadUserContext(input.id, env, options);
 
     const maxAgeSeconds = resolveSessionMaxAge(env, options);
     const jti = crypto.randomUUID();
@@ -455,6 +488,8 @@ export async function createSessionForUser(
         emailVerified: input.emailVerified ?? null,
         timezone: context.timezone,
         locale: context.locale,
+        twoFactor: context.twoFactor,
+        twoFactorRequiredFrom: context.twoFactorRequiredFrom,
     };
 
     const metadata: SessionMetadata = {
@@ -493,6 +528,7 @@ export async function createSessionForUser(
             permissions: context.permissions,
             platformAdmin: context.platformAdmin,
             createdAt: context.createdAt,
+            ...twoFactorFields(snapshot),
         },
     };
 }
@@ -548,6 +584,9 @@ function parseSnapshot(raw: string | null): RegistrySnapshot | null {
             emailVerified: parsed.emailVerified ?? null,
             timezone: typeof parsed.timezone === 'string' ? parsed.timezone : null,
             locale: typeof parsed.locale === 'string' ? parsed.locale : null,
+            twoFactor: parsed.twoFactor === true,
+            twoFactorRequiredFrom:
+                typeof parsed.twoFactorRequiredFrom === 'number' ? parsed.twoFactorRequiredFrom : null,
         };
     } catch {
         return null;
@@ -568,7 +607,7 @@ async function refreshSnapshotIfStale(
     if (currentVersion <= snapshot.v) return snapshot;
 
     try {
-        const context = await loadUserContext(userId, env);
+        const context = await loadUserContext(userId, env, options);
         const refreshed: RegistrySnapshot = {
             c: snapshot.c,
             v: currentVersion,
@@ -582,6 +621,8 @@ async function refreshSnapshotIfStale(
             emailVerified: context.emailVerified,
             timezone: context.timezone,
             locale: context.locale,
+            twoFactor: context.twoFactor,
+            twoFactorRequiredFrom: context.twoFactorRequiredFrom,
         };
         // Rewrite so the version matches and subsequent requests skip the D1 read. The device
         // metadata rides along, or the sessions page would lose it on the first profile edit.
@@ -612,7 +653,41 @@ function buildUser(payload: SessionTokenPayload, snapshot: RegistrySnapshot | nu
         createdAt: snapshot?.createdAt ?? payload.createdAt ?? null,
         timezone: snapshot?.timezone ?? null,
         locale: snapshot?.locale ?? null,
+        ...twoFactorFields(snapshot),
     };
+}
+
+/**
+ * True when a policy requires two-factor of this person, its date has come, and they have not
+ * turned it on. Such a session reaches the auth routes only (`/api/auth/*`: the session read,
+ * the setup, sign-out) until they do.
+ */
+function twoFactorSetupRequired(snapshot: RegistrySnapshot | null, now = Date.now()): boolean {
+    return (
+        !!snapshot &&
+        !snapshot.twoFactor &&
+        snapshot.twoFactorRequiredFrom !== null &&
+        now >= snapshot.twoFactorRequiredFrom
+    );
+}
+
+function twoFactorFields(
+    snapshot: RegistrySnapshot | null,
+): Pick<SessionUser, 'twoFactorEnabled' | 'twoFactorRequiredFrom' | 'twoFactorSetupRequired'> {
+    return {
+        twoFactorEnabled: snapshot?.twoFactor ?? false,
+        twoFactorRequiredFrom: snapshot?.twoFactorRequiredFrom ?? null,
+        twoFactorSetupRequired: twoFactorSetupRequired(snapshot),
+    };
+}
+
+/** The paths a session that still owes two-factor setup may reach. */
+function allowedBeforeTwoFactorSetup(request: Request): boolean {
+    try {
+        return new URL(request.url).pathname.startsWith('/api/auth/');
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -712,7 +787,13 @@ export async function getSession(
         // Within grace: self-heal by loading the context from D1 and re-writing the
         // registry record so later requests hit the fast path.
         if (env.OBCF_D1) {
-            const context = await loadUserContext(payload.sub, env);
+            let context: UserContext;
+            try {
+                context = await loadUserContext(payload.sub, env, options);
+            } catch (error) {
+                console.warn('Failed to load session context; failing closed:', error);
+                return null;
+            }
             snapshot = {
                 c: createdMsClaim || Date.now(),
                 v: currentVersion,
@@ -726,6 +807,8 @@ export async function getSession(
                 emailVerified: context.emailVerified,
                 timezone: context.timezone,
                 locale: context.locale,
+                twoFactor: context.twoFactor,
+                twoFactorRequiredFrom: context.twoFactorRequiredFrom,
             };
             await writeRegistrySnapshot(payload.sub, payload.jti, snapshot, resolveSessionMaxAge(env, options), env, {
                 c: snapshot.c,
@@ -734,7 +817,24 @@ export async function getSession(
         }
     }
 
+    if (twoFactorSetupRequired(snapshot) && !allowedBeforeTwoFactorSetup(request)) return null;
+
     return { user: buildUser(payload, snapshot), expires: (payload.exp ?? 0) * 1000 };
+}
+
+/**
+ * Make every live session of a user re-read its snapshot from D1 on its next request (role,
+ * profile or factor change). Same key and value the app's own helper writes.
+ */
+export async function bumpProfileVersion(
+    userId: string,
+    env: AuthEnv,
+    options?: CreateAuthConfigOptions,
+): Promise<void> {
+    if (!env.OBCF_KV) return;
+    await env.OBCF_KV.put(profileVersionKey(userId), String(Date.now()), {
+        expirationTtl: resolveSessionMaxAge(env, options),
+    });
 }
 
 /** Revoke a single session (used by normal sign-out). Fails loudly so callers can surface it. */
@@ -797,12 +897,18 @@ export async function sessionPublicId(jti: string, env: AuthEnv): Promise<string
 export async function readSessionIdentity(
     request: Request,
     env: AuthEnv,
-): Promise<{ userId: string; jti: string } | null> {
+): Promise<{ userId: string; jti: string; createdMs: number } | null> {
     const token = parseCookies(request.headers.get('Cookie'))[resolveSessionCookieName(env)];
     if (!token) return null;
     try {
         const payload = await verifyJwt<SessionTokenPayload>(token, resolveAuthSecret(env));
-        return payload?.sub && payload.jti ? { userId: payload.sub, jti: payload.jti } : null;
+        return payload?.sub && payload.jti
+            ? {
+                  userId: payload.sub,
+                  jti: payload.jti,
+                  createdMs: Number(payload.cms) || (Number(payload.iat) || 0) * 1000,
+              }
+            : null;
     } catch {
         return null;
     }

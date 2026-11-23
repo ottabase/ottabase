@@ -26,6 +26,15 @@ export interface SessionUser {
     timezone?: string | null;
     /** BCP 47 tag (`en-GB`) for language and number/date formats; null until set. */
     locale?: string | null;
+    /** Two-factor sign-in is on (a confirmed authenticator app). */
+    twoFactorEnabled?: boolean;
+    /** Epoch ms from which a policy requires two-factor of this person; null when none does. */
+    twoFactorRequiredFrom?: number | null;
+    /**
+     * A policy requires two-factor now and it is off. The session reaches `/api/auth/*` only until
+     * it is turned on: the app shows its setup screen and nothing else.
+     */
+    twoFactorSetupRequired?: boolean;
     [key: string]: unknown;
 }
 
@@ -104,10 +113,20 @@ export interface UserVerifiedEvent {
     at: number;
 }
 
+/** `user.factor.changed`: a sign-in factor was added or removed. For the audit log and a security email. */
+export interface UserFactorChangedEvent {
+    userId: string;
+    factor: 'totp' | 'passkey' | 'recovery-codes';
+    change: 'added' | 'removed' | 'regenerated';
+    /** Epoch milliseconds. */
+    at: number;
+}
+
 /** The bus events `@ottabase/auth` announces through `CreateAuthConfigOptions.emit`. */
 export interface AuthEvents {
     'user.created': UserCreatedEvent;
     'user.verified': UserVerifiedEvent;
+    'user.factor.changed': UserFactorChangedEvent;
 }
 
 export interface CredentialsAuthorizeOptions {
@@ -135,6 +154,20 @@ export interface CreateAuthConfigOptions extends CredentialsAuthorizeOptions {
      * from `Accept-Language` only when its language is in this list; omitted = any language.
      */
     supportedLanguages?: readonly string[];
+    /**
+     * Epoch ms from which this person must have two-factor sign-in on, or null when nothing
+     * requires it (an organization policy, say). Read when a session snapshot is (re)built: bump
+     * the person's profile version when the answer changes. Once the date passes, a session
+     * without two-factor reaches `/api/auth/*` only. A throw fails the sign-in.
+     */
+    secondFactorRequiredFrom?: (env: AuthEnv, userId: string) => Promise<number | null>;
+    /**
+     * Name an authenticator app shows next to the code (`issuer` in the otpauth URI) and the
+     * browser shows when a passkey is made. Default: AUTH_URL's host.
+     */
+    appName?: string;
+    /** App path of the second-factor page OAuth and magic-link sign-ins redirect to (default: `/login/two-factor`). */
+    twoFactorPage?: string;
     /** Called after a user signs out (session revoked). Use to clear app-level caches. */
     onSignOut?: (userId: string) => Promise<void> | void;
     /**
