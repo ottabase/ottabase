@@ -675,7 +675,8 @@ export default [
         // Where the binding becomes the ORM's driver, which is how every query gets RLS: the
         // Worker's connection registration (db-utils), the landing's (lib/content), the migration
         // runner (ottaorm-init), the cron task repository, and the package compositions whose
-        // manifest takes a driver factory (meter, vault).
+        // manifest takes a driver factory (meter, vault, and Pro's Workbench, here and where its
+        // template lives).
         files: [
             'apps/*/worker/lib/db-utils.ts',
             'apps/*/lib/content.ts',
@@ -684,6 +685,8 @@ export default [
             'apps/*/worker/cron.ts',
             'apps/*/ottabase/packages/meter.ts',
             'apps/*/ottabase/packages/vault.ts',
+            'apps/*/ottabase/packages/workbench.ts',
+            'packages/pro/workbench/app/ottabase/packages/workbench.ts',
         ],
         rules: { 'ottabase/no-raw-d1': 'off' },
     },
