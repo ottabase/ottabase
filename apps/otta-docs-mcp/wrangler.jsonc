@@ -1,8 +1,10 @@
 {
     // The Ottabase documentation as a remote MCP server. See README.md.
     //
-    // No bindings and no secrets: the docs are bundled into the Worker at build time
-    // (scripts/build-corpus.mjs) and every tool only reads them.
+    // No secrets. The docs are bundled into the Worker at build time (scripts/build-corpus.mjs) and every
+    // tool only reads them. Production also binds AI Search (hybrid search and answers, kept in sync by the
+    // cron) and two rate limiters for the HTTP API; dev binds nothing and falls back to the keyword index.
+    // Keep worker/env.ts in step with the bindings.
 
     "$schema": "node_modules/wrangler/config-schema.json",
 
@@ -26,6 +28,16 @@
             "routes": [{ "pattern": "mcp.ottabase.com", "custom_domain": true }],
             // One public address: the listing names the custom domain, not a workers.dev twin.
             "workers_dev": false,
+            // The namespace holds one instance, `docs`, created by the first sync. Wrangler creates the namespace
+            // on deploy if it is missing. The namespace binding is the one that can write items.
+            "ai_search_namespaces": [{ "binding": "DOCS_SEARCH", "namespace": "ottabase-docs" }],
+            // Per address, per minute. namespace_id is an account-wide integer: otta-web uses 1001-2004.
+            "ratelimits": [
+                { "name": "SEARCH_LIMIT", "namespace_id": "3001", "simple": { "limit": 30, "period": 60 } },
+                { "name": "ASK_LIMIT", "namespace_id": "3002", "simple": { "limit": 6, "period": 60 } },
+            ],
+            // Every 15 minutes: an unchanged corpus costs three list calls; a deploy is indexed within the quarter hour.
+            "triggers": { "crons": ["*/15 * * * *"] },
             "observability": {
                 "enabled": true,
                 "logs": {

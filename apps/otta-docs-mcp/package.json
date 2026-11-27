@@ -2,7 +2,7 @@
     "name": "@ottabase/otta-docs-mcp",
     "version": "1.0.0",
     "private": true,
-    "description": "The Ottabase documentation as a remote MCP server (search, read, list) on Cloudflare Workers",
+    "description": "The Ottabase documentation as a remote MCP server (search, read, list) and a search and answer API, on Cloudflare Workers with AI Search",
     "type": "module",
     "ottabase": {
         "start": {
@@ -33,6 +33,7 @@
     },
     "dependencies": {
         "@modelcontextprotocol/server": "2.4.0",
+        "@ottabase/cf": "workspace:*",
         "@ottabase/utils": "workspace:*"
     },
     "devDependencies": {

@@ -13,11 +13,15 @@
 
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server';
 import { DOC_KINDS, KIND_LABEL, sourceUrl, type CorpusDoc, type DocKind } from './corpus';
-import { nearestDocs, resolveDoc, search, type DocsIndex, type Section } from './search';
+import { nearestDocs, resolveDoc, type DocsIndex, type SearchOptions, type Section } from './search';
+import type { DocsSearchResult } from './semantic';
+
+/** How `search_docs` finds sections: hybrid AI Search when bound, else the keyword index. */
+export type DocsSearch = (query: string, options: SearchOptions) => Promise<DocsSearchResult>;
 
 export const SERVER_NAME = 'ottabase-docs';
 /** What clients are told. Bump it when a tool's name, arguments or behaviour changes. */
-export const SERVER_VERSION = '1.0.0';
+export const SERVER_VERSION = '1.1.0';
 
 /** A page longer than this comes back as an outline plus its first part. About 4,000 tokens. */
 export const MAX_DOC_CHARS = 16_000;
@@ -110,7 +114,7 @@ function page(index: DocsIndex, doc: CorpusDoc, section?: string): string {
     ].join('\n');
 }
 
-export function createDocsServer(index: DocsIndex): McpServer {
+export function createDocsServer(index: DocsIndex, searchDocs: DocsSearch): McpServer {
     const server = new McpServer(
         { name: SERVER_NAME, title: 'Ottabase Docs', version: SERVER_VERSION },
         {
@@ -124,7 +128,7 @@ export function createDocsServer(index: DocsIndex): McpServer {
         {
             title: 'Search Ottabase docs',
             description:
-                'Search the Ottabase framework documentation by keyword: package READMEs, guides, the quickstart and architecture pages, and agent skills. Returns the best-matching sections, each with its document id, section heading, a short excerpt and a source link. Use it to find how an Ottabase package, API, CLI command or convention works.',
+                'Search the Ottabase framework documentation by meaning and by keyword: package READMEs, guides, the quickstart and architecture pages, and agent skills. Takes a question or keywords. Returns the best-matching sections, each with its document id, section heading, a short excerpt and a source link. Use it to find how an Ottabase package, API, CLI command or convention works.',
             inputSchema: fromJsonSchema<{ query: string; kind?: DocKind; limit?: number }>({
                 type: 'object',
                 properties: {
@@ -132,7 +136,8 @@ export function createDocsServer(index: DocsIndex): McpServer {
                         type: 'string',
                         minLength: 2,
                         maxLength: 200,
-                        description: 'Keywords, for example "row level security" or "queue retry".',
+                        description:
+                            'A question or keywords, for example "how do I retry a failed queue job" or "row level security".',
                     },
                     kind: kindSchema('Search one group of pages only.'),
                     limit: {
@@ -148,7 +153,7 @@ export function createDocsServer(index: DocsIndex): McpServer {
             annotations: { title: 'Search Ottabase docs', ...READ_ONLY },
         },
         async ({ query, kind, limit }) => {
-            const hits = search(index, query, { kind, limit });
+            const { hits } = await searchDocs(query, { kind, limit });
             if (hits.length === 0) {
                 return text(
                     `No documentation matched "${query}". Try fewer or different keywords, or a package name such as ottaorm, auth, rbac, queue or forms.`,
