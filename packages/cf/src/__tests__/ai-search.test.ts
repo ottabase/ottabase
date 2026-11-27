@@ -159,6 +159,27 @@ describe('AiSearchClient: search and ask', () => {
             model: DEFAULT_ANSWER_MODEL,
         });
     });
+
+    it('refuses an answer written from a chunk outside the scope', async () => {
+        const { instance, raw } = fakeInstance();
+        raw.chatCompletions.mockResolvedValueOnce({
+            choices: [{ message: { role: 'assistant', content: 'From somewhere else.' } }],
+            chunks: [chunk('kb/limits.md'), chunk('other-tenant/secret.md')],
+        });
+        const result = await createAiSearchClient({ instance, prefix: 'kb/' }).ask('anything');
+        expect(result.success).toBe(false);
+        expect(!result.success && result.error.message).toMatch(/outside the client scope/);
+    });
+
+    it('answers from any chunk when unscoped', async () => {
+        const { instance, raw } = fakeInstance();
+        raw.chatCompletions.mockResolvedValueOnce({
+            choices: [{ message: { role: 'assistant', content: 'Fine.' } }],
+            chunks: [chunk('anywhere/a.md')],
+        });
+        const result = await createAiSearchClient({ instance }).ask('anything');
+        expect(result.success && result.data.answer).toBe('Fine.');
+    });
 });
 
 describe('AiSearchClient: items', () => {

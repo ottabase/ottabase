@@ -227,6 +227,11 @@ export class AiSearchClient {
                 model,
                 ai_search_options: this.retrieval(options),
             });
+            // Search can drop a chunk from outside the scope; an answer cannot, because the model has already read
+            // it. So an answer written from anything outside the scope is refused, never returned.
+            if ((response.chunks ?? []).some((chunk) => !chunk.item.key.startsWith(this.prefix))) {
+                throw new CloudflareError('AI Search answered from outside the client scope', 'AI_SEARCH_SCOPE_LEAK');
+            }
             return {
                 answer: response.choices[0]?.message.content?.trim() ?? '',
                 hits: this.hits(response.chunks ?? []),

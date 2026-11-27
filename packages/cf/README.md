@@ -238,6 +238,8 @@ const articles = docs.scoped('articles/');
   unchanged documents: `sync` is how.
 - `ask` generates with `DEFAULT_ANSWER_MODEL` (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`), billed to Workers AI. For a
   tenant's corpus, retrieve with `search` and generate through `@ottabase/ottaai` so the tenant's key pays.
+- Scopes fail closed: `search` drops any chunk from outside the client's prefix, and `ask` refuses the whole answer
+  (`AI_SEARCH_SCOPE_LEAK`), because the model has already read it.
 - Queries are metered (1,000 a month included per account): search on submit, not on every keystroke.
 
 ### Workers AI
