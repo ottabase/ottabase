@@ -502,6 +502,10 @@
             "version_metadata": { "binding": "OBCF_VERSION" },
             "images": { "binding": "OBCF_IMAGES" },
             "ai": { "binding": "OBCF_AI" },
+            // AI Search (optional, any env): managed hybrid search and answers over documents a package pushes in
+            // (`@ottabase/cf/ai-search`). A namespace binding, because only it can write items; each feature keeps
+            // its own instance inside it. Wrangler creates the namespace on deploy. Without it, features fall back.
+            "ai_search_namespaces": [{ "binding": "OBCF_AI_SEARCH", "namespace": "ottabase-demo" }],
             "browser": { "binding": "OBCF_BROWSER" },
             "kv_namespaces": [
                 {
