@@ -14,6 +14,7 @@ Type-safe wrappers for all major Cloudflare Worker bindings:
 - **Secrets**: Environment variables and secrets management
 - **Rate Limiting**: Request throttling and protection
 - **Vectorize**: Similarity search over embeddings, namespaced per tenant
+- **AI Search**: Managed hybrid search and cited answers over uploaded documents, prefix-scoped, with an idempotent sync
 - **Workers AI**: `run()` any model, plus `embed()` and `generateText()`
 - **Browser Rendering**: PDF, screenshot, Markdown, links and structured extraction without puppeteer
 - **Workflows**: start, inspect and steer durable runs
@@ -191,6 +192,53 @@ const vectors = createVectorizeClient({ index: env.OBCF_VECTORIZE, namespace: or
 await vectors.upsert([{ id: 'doc_1', values: embedding, metadata: { title: 'Pricing' } }]);
 const hits = await vectors.query(queryEmbedding, { topK: 5, returnMetadata: 'all' }); // never another tenant's rows
 ```
+
+### AI Search
+
+Managed hybrid search (vectors plus keywords) and cited answers. Upload documents and AI Search chunks, embeds and
+indexes them; `search()` returns chunks and `ask()` has a model answer from them. Bind a **namespace**
+(`ai_search_namespaces`): the single-instance binding cannot write items. Nothing runs locally, so keep a fallback for
+when the binding is absent.
+
+```jsonc
+// wrangler.jsonc: wrangler creates the namespace on deploy if it is missing
+"ai_search_namespaces": [{ "binding": "DOCS_SEARCH", "namespace": "my-app-docs" }]
+```
+
+```typescript
+import { createAiSearchClient, openAiSearchInstance } from '@ottabase/cf/ai-search';
+
+// Get the instance, or create it on first use (hybrid index, filterable `kind`, and the `hash` sync keeps).
+const opened = await openAiSearchInstance(env.DOCS_SEARCH, {
+    id: 'docs',
+    index_method: { vector: true, keyword: true },
+    custom_metadata: [
+        { field_name: 'kind', data_type: 'text' },
+        { field_name: 'hash', data_type: 'text' },
+    ],
+});
+if (!opened.success) throw opened.error;
+const search = createAiSearchClient({ instance: opened.data });
+
+// Make the index hold exactly these documents: changed ones upload, gone ones delete, unchanged ones cost nothing.
+const report = await search.sync([{ name: 'guides/queues.md', content: markdown, metadata: { kind: 'guide' } }]);
+
+// Per request, `namespace.get(id)` is free: no network call until a method runs.
+const docs = createAiSearchClient({ instance: env.DOCS_SEARCH.get('docs') });
+const hits = await docs.search('how do retries work', { limit: 5, filters: { kind: 'guide' } });
+const answer = await docs.ask('How do I retry a failed message?', { system: 'Answer only from the context.' });
+
+// A scoped client stamps its prefix on writes and forces a folder filter on reads: it cannot see outside it.
+const articles = docs.scoped('articles/');
+```
+
+- `upsert`, `remove`, `list` and `sync` write and read items; an upload of an existing name replaces it.
+- `sync` refuses an empty list (it would empty the scope) unless `{ allowEmpty: true }`, skips items still indexing, and
+  stops at the first failed write so the next run resumes. Ingestion is billed by the token, so never re-upload
+  unchanged documents: `sync` is how.
+- `ask` generates with `DEFAULT_ANSWER_MODEL` (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`), billed to Workers AI. For a
+  tenant's corpus, retrieve with `search` and generate through `@ottabase/ottaai` so the tenant's key pays.
+- Queries are metered (1,000 a month included per account): search on submit, not on every keystroke.
 
 ### Workers AI
 

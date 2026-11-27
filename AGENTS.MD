@@ -509,6 +509,7 @@ import { createKVClient } from '@ottabase/cf/kv';
 import { createR2Client } from '@ottabase/cf/r2';
 import { createRateLimitingClient } from '@ottabase/cf/rate-limiting';
 import { createVectorizeClient } from '@ottabase/cf/vectorize'; // per-tenant namespace on one index
+import { createAiSearchClient } from '@ottabase/cf/ai-search'; // managed hybrid search + answers, prefix-scoped, sync
 import { createAiClient } from '@ottabase/cf/ai'; // raw Workers AI: run, embed, generateText
 import { createBrowserClient } from '@ottabase/cf/browser'; // quick actions: pdf, screenshot, markdown, json
 import { createWorkflowsClient } from '@ottabase/cf/workflows'; // start by id, status, events

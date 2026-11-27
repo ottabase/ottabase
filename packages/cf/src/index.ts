@@ -67,6 +67,24 @@ export {
 // Vectorize
 export { VectorizeClient, createVectorizeClient, type VectorizeConfig, type VectorizeQuery } from './vectorize';
 
+// AI Search
+export {
+    AI_SEARCH_HASH_FIELD,
+    AiSearchClient,
+    contentHash,
+    createAiSearchClient,
+    DEFAULT_ANSWER_MODEL,
+    openAiSearchInstance,
+    type AiSearchAnswer,
+    type AiSearchAskOptions,
+    type AiSearchClientConfig,
+    type AiSearchDocument,
+    type AiSearchHit,
+    type AiSearchQueryOptions,
+    type AiSearchSyncOptions,
+    type AiSearchSyncReport,
+} from './ai-search';
+
 // Workers AI
 export {
     AiClient,
