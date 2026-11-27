@@ -9,6 +9,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added (Unreleased)
 
+- **`@ottabase/cf/ai-search`: Cloudflare AI Search, wrapped.** Managed hybrid search (vectors plus keywords) and answers
+  written from the matching chunks, over documents you upload. `createAiSearchClient({ instance, prefix? })` gives
+  `search`, `ask`, `upsert`, `remove`, `list`, `stats` and `sync`. `sync` makes the index hold exactly a list of
+  documents: it uploads only what changed (by a content hash in each item's metadata, since ingestion is billed by the
+  token), deletes what is gone, refuses an empty list unless told, leaves items still indexing for the next run, and
+  stops at the first failed write so the next run resumes. A prefix scopes a client: its writes are stamped with it and
+  every search carries a folder filter the caller cannot replace. `openAiSearchInstance(namespace, config)` gets an
+  instance or creates it on first use. Writing items needs the namespace binding (`ai_search_namespaces`); the
+  single-instance binding cannot upload. otta-web's `env.demo` binds `OBCF_AI_SEARCH`.
+- **The docs answer questions, not only keywords.** `apps/otta-docs-mcp` keeps the docs in an AI Search instance too (a
+  cron every 15 minutes syncs it, uploading only pages that changed). `search_docs` searches by meaning and keyword and
+  falls back to the bundled keyword index without the binding, on a failure, or on no hits. New HTTP routes:
+  `GET /api/search` (sections with GitHub links at their headings) and `POST /api/ask` (a short answer written from the
+  docs, with its sources), open CORS, limited per address. The docs viewer (`@ottabase/docs`) takes an optional `search`
+  (`createRemoteDocsSearch(endpoint, { resolveSlug })`) and shows "Found in the text" under its title filter; otta-web
+  turns it on with `VITE_DOCS_SEARCH_URL`, off by default.
+
 - **`otta add` brings a package's later release into an app without losing its edits.** It records the template each
   copied `app/` file came from (`apps/<app>/.ottabase-templates.json`) and, on the next add: replaces an untouched copy
   with the new template, merges the template's changes into an edited copy with `git merge-file`, or writes conflict

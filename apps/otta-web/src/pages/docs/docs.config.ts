@@ -1,5 +1,6 @@
 import type { DocsConfig, DocsSource } from '@ottabase/docs';
-import { extractTitle, fileNameToSlug, slugToTitle } from '@ottabase/docs';
+import { createRemoteDocsSearch, extractTitle, fileNameToSlug, slugToTitle } from '@ottabase/docs';
+import { createDocsSlugResolver } from './docs-search';
 
 /**
  * Load markdown files from Vite's import.meta.glob result into a DocsSource.
@@ -80,12 +81,21 @@ const packageModules = import.meta.glob('/../../packages/*/README.md', {
     import: 'default',
 }) as Record<string, () => Promise<string>>;
 
+const sources: DocsSource[] = [
+    createDocsSource('Guides', guidesModules, { basePath: 'guides', order: 0 }),
+    // Set to empty {} to disable package READMEs
+    createPackageSource(packageModules, { prefix: '@ottabase/', order: 10 }),
+];
+
+// 3. Full-text search, set at build time (e.g. https://mcp.ottabase.com/api/search). Unset: the sidebar keeps its
+// title filter only and no request leaves the app.
+const searchUrl = import.meta.env.VITE_DOCS_SEARCH_URL;
+
 export const docsConfig: DocsConfig = {
     theme: 'spacious',
     codeRenderMode: 'ui-code-highlight',
-    sources: [
-        createDocsSource('Guides', guidesModules, { basePath: 'guides', order: 0 }),
-        // Set to empty {} to disable package READMEs
-        createPackageSource(packageModules, { prefix: '@ottabase/', order: 10 }),
-    ],
+    sources,
+    search: searchUrl
+        ? createRemoteDocsSearch(searchUrl, { limit: 8, resolveSlug: createDocsSlugResolver(sources) })
+        : undefined,
 };

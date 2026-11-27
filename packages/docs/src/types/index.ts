@@ -55,6 +55,23 @@ export type DocsCodeRenderMode =
     | 'simple' // Built-in: copy button + lang label, no syntax highlighting
     | 'ui-code-highlight'; // Uses @ottabase/ui-code-highlight for uniformity
 
+/** One full-text search result, shown under the sidebar's title filter */
+export interface DocsSearchHit {
+    /** Page title */
+    title: string;
+    /** The heading the match sits under; the viewer scrolls to it when it opens the page */
+    heading?: string;
+    /** Plain-text snippet around the match */
+    excerpt?: string;
+    /** A page in this viewer (a full slug, as `buildPageSlug` makes it) */
+    slug?: string;
+    /** Where to read it when the viewer does not have the page; opens in a new tab */
+    href?: string;
+}
+
+/** Full-text search: resolve the hits for a query. Abort the request when `signal` fires. */
+export type DocsSearch = (query: string, signal: AbortSignal) => Promise<DocsSearchHit[]>;
+
 /** Configuration for the docs viewer */
 export interface DocsConfig {
     /** Documentation sources. Slugs are relative; the host router owns the URL prefix (see onNavigate). */
@@ -63,4 +80,9 @@ export interface DocsConfig {
     theme?: DocsTheme;
     /** Code block rendering: 'simple' or 'ui-code-highlight' (default) */
     codeRenderMode?: DocsCodeRenderMode;
+    /**
+     * Optional full-text search. The sidebar calls it 400 ms after typing stops, for queries of 3+ characters,
+     * and aborts the previous call. Unset: only the instant title filter, and no request leaves the page.
+     */
+    search?: DocsSearch;
 }

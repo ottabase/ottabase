@@ -6,11 +6,22 @@ export { useDocs } from './hooks/useDocs';
 export type { UseDocsOptions } from './hooks/useDocs';
 
 // Types
-export type { DocGroup, DocPage, DocsConfig, DocsSource, DocsTheme, DocsCodeRenderMode, TocItem } from './types';
+export type {
+    DocGroup,
+    DocPage,
+    DocsConfig,
+    DocsSearch,
+    DocsSearchHit,
+    DocsSource,
+    DocsTheme,
+    DocsCodeRenderMode,
+    TocItem,
+} from './types';
 
 // Utils
 export {
     buildPageSlug,
+    createRemoteDocsSearch,
     extractTitle,
     extractToc,
     fileNameToSlug,
@@ -18,3 +29,4 @@ export {
     organizePages,
     slugToTitle,
 } from './utils';
+export type { RemoteDocsSearchHit, RemoteDocsSearchOptions } from './utils';

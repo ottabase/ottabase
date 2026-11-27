@@ -6,7 +6,8 @@ table of contents. Colors from Brand Kit; layout themes control spacing and dens
 ## Features
 
 - Markdown rendering (headings, code blocks, tables, lists, links, images)
-- Left sidebar with search and grouped navigation
+- Left sidebar with an instant title filter and grouped navigation
+- Optional full-text search (`search`): debounced, abortable, a hit opens its page at the matching heading
 - Right table of contents with scroll tracking
 - Responsive with mobile drawer navigation
 - Dark mode via Brand Kit
@@ -26,8 +27,9 @@ pnpm add @ottabase/docs
 
 The package splits along a UI boundary so the `.` barrel pulls in zero rendered React:
 
-- `@ottabase/docs` — pure, tree-shakeable helpers and types: `buildPageSlug`, `extractTitle`, `extractToc`,
-  `fileNameToSlug`, `findPageBySlug`, `organizePages`, `slugToTitle`, the `useDocs` hook, and all type re-exports.
+- `@ottabase/docs` — pure, tree-shakeable helpers and types: `buildPageSlug`, `createRemoteDocsSearch`, `extractTitle`,
+  `extractToc`, `fileNameToSlug`, `findPageBySlug`, `organizePages`, `slugToTitle`, the `useDocs` hook, and all type
+  re-exports.
 - `@ottabase/docs/react` — rendered components: `DocsLayout`, `DocsSidebar`, `MarkdownRenderer`, `TableOfContents` (this
   is the only entry that value-imports `@ottabase/ui-code-highlight` and `@ottabase/ui`, optional peers needed only
   here).
@@ -91,8 +93,81 @@ interface DocsConfig {
     theme?: 'compact' | 'standard' | 'spacious'; // Layout theme
     codeRenderMode?: 'plain' | 'simple' | 'ui-code-highlight'; // Code block rendering
     sources: DocsSource[]; // Documentation sources
+    search?: (query: string, signal: AbortSignal) => Promise<DocsSearchHit[]>; // Optional full-text search
 }
 ```
+
+## Full-text search
+
+The sidebar's filter matches page titles instantly. Give the config a `search` and the sidebar also lists **Found in the
+text**: hits from your search backend, under the filtered pages. It calls `search` 400 ms after typing stops, only for
+queries of 3+ characters, and aborts the previous call, so a metered backend sees one request per pause, not one per
+keystroke. Without `search` nothing changes and no request leaves the page.
+
+```typescript
+interface DocsSearchHit {
+    title: string; // Page title
+    heading?: string; // Heading the match sits under: the page opens scrolled to it
+    excerpt?: string; // Plain-text snippet
+    slug?: string; // A page in this viewer (full slug, e.g. 'packages/queue'), opened through onNavigate
+    href?: string; // Otherwise, where to read it: opens in a new tab
+}
+```
+
+Hit text renders as text and `href` goes through `sanitizeUrl`, so hits from a remote service are safe to show. Clicking
+a `slug` hit calls `onNavigate(slug)` and, once that page has rendered, scrolls to the heading whose id the renderer
+derives from `heading` (a repeated heading lands on its first occurrence). `DocsSidebar` used on its own passes that id
+as a second argument, `onNavigate(slug, headingId)`, for you to scroll to.
+
+`createRemoteDocsSearch(endpoint, { limit, resolveSlug })` builds a `search` for an endpoint that answers
+`GET <endpoint>?q=<query>&limit=<n>` with `{ hits: [{ id, title, heading?, excerpt?, url? }] }`, where `id` is the
+page's repo path. Ottabase's own docs are served that way at `https://mcp.ottabase.com/api/search`
+(`apps/otta-docs-mcp`). `resolveSlug` maps an `id` to a page this viewer has; a hit it returns `undefined` for links to
+its `url`. A failed request (a `429` included) shows a quiet one-line notice.
+
+```tsx
+import { useState } from 'react';
+import { buildPageSlug, createRemoteDocsSearch, type DocsConfig, type DocsSource } from '@ottabase/docs';
+import { DocsLayout } from '@ottabase/docs/react';
+import '@ottabase/docs/styles.css';
+
+const sources: DocsSource[] = [
+    {
+        label: 'Packages',
+        basePath: 'packages',
+        pages: [
+            {
+                slug: 'queue',
+                title: '@ottabase/queue',
+                content: '# @ottabase/queue\n\n## Dead Letter Queue (DLQ)\n\nFailed messages land here.',
+                sourcePath: 'packages/queue/README.md',
+            },
+        ],
+    },
+];
+
+// Repo path → this viewer's slug, read from the pages themselves.
+const slugByPath = new Map(
+    sources.flatMap((source) => source.pages.map((page) => [page.sourcePath, buildPageSlug(source, page)] as const)),
+);
+
+const config: DocsConfig = {
+    sources,
+    search: createRemoteDocsSearch('https://mcp.ottabase.com/api/search', {
+        limit: 8,
+        resolveSlug: (id) => slugByPath.get(id),
+    }),
+};
+
+export function DocsPage() {
+    const [activeSlug, setActiveSlug] = useState('packages/queue');
+    return <DocsLayout config={config} activeSlug={activeSlug} onNavigate={setActiveSlug} />;
+}
+```
+
+Any other backend works the same way: `search` is just `(query, signal) => Promise<DocsSearchHit[]>`; pass `signal` to
+your request so a superseded query is cancelled. The sidebar keeps the latest `search` without re-running it when only
+the function's identity changes, so a config rebuilt on each render does not cost extra requests.
 
 ## Layout Themes
 

@@ -3,7 +3,7 @@ import { CodeBlock } from '@ottabase/ui-code-highlight';
 import { sanitizeBlockHtml } from '@ottabase/utils/sanitize';
 import { memo, useCallback, useMemo } from 'react';
 import type { DocsCodeRenderMode, TocItem } from '../types';
-import { extractToc } from '../utils';
+import { extractToc, headingId } from '../utils';
 
 interface MarkdownRendererProps {
     content: string;
@@ -312,12 +312,7 @@ function renderMarkdownWithBlocks(md: string): { html: string; codeBlocks: CodeB
         const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
         if (headingMatch) {
             const level = headingMatch[1].length;
-            const text = headingMatch[2].replace(/[*_`\[\]]/g, '').trim();
-            let id = text
-                .toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .replace(/^-+|-+$/g, ''); // strip leading/trailing dashes (e.g. from emoji prefixes)
+            let id = headingId(headingMatch[2]);
             // Deduplicate IDs for repeated headings
             const count = usedIds.get(id) || 0;
             usedIds.set(id, count + 1);

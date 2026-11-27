@@ -7,6 +7,7 @@ import * as reactEntry from '../react';
 const RENDERED = ['DocsLayout', 'DocsSidebar', 'MarkdownRenderer', 'TableOfContents'] as const;
 const PURE = [
     'buildPageSlug',
+    'createRemoteDocsSearch',
     'extractTitle',
     'extractToc',
     'fileNameToSlug',

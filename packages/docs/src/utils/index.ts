@@ -1,4 +1,4 @@
-import type { DocGroup, DocPage, DocsSource, TocItem } from '../types';
+import type { DocGroup, DocPage, DocsSearch, DocsSearchHit, DocsSource, TocItem } from '../types';
 
 /** Extract a title from markdown content (first # heading) */
 export function extractTitle(content: string): string {
@@ -67,6 +67,20 @@ export function slugToTitle(slug: string): string {
         .replace(/^Index$/, 'Overview');
 }
 
+/**
+ * The id the renderer gives a heading (before de-duplication): markdown markers stripped, lowercased, dashed.
+ * One routine for the renderer, the table of contents and search hits, so all three point at the same element.
+ */
+export function headingId(text: string): string {
+    return text
+        .replace(/[*_`\[\]]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/^-+|-+$/g, ''); // strip leading/trailing dashes (e.g. from emoji prefixes)
+}
+
 /** Extract table of contents from markdown content */
 export function extractToc(content: string): TocItem[] {
     const items: TocItem[] = [];
@@ -85,11 +99,7 @@ export function extractToc(content: string): TocItem[] {
         if (match) {
             const level = match[1].length;
             const text = match[2].replace(/[*_`\[\]]/g, '').trim();
-            let id = text
-                .toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '')
-                .replace(/\s+/g, '-')
-                .replace(/^-+|-+$/g, ''); // strip leading/trailing dashes (e.g. from emoji prefixes)
+            let id = headingId(text);
             // Deduplicate IDs for repeated headings (must match renderMarkdown logic)
             const count = usedIds.get(id) || 0;
             usedIds.set(id, count + 1);
@@ -152,4 +162,56 @@ export function buildPageSlug(source: DocsSource, page: DocPage): string {
         return `${source.basePath}/${page.slug}`;
     }
     return page.slug;
+}
+
+/** One hit as a docs search endpoint returns it (`GET <endpoint>?q=…&limit=…` → `{ hits: [...] }`). */
+export interface RemoteDocsSearchHit {
+    /** Repo path of the page, e.g. `packages/queue/README.md` or `docs/API_PAGINATION.md` */
+    id: string;
+    title: string;
+    heading?: string;
+    excerpt?: string;
+    /** Where the page can be read outside this viewer */
+    url?: string;
+}
+
+export interface RemoteDocsSearchOptions {
+    /** Hits per query (default 8) */
+    limit?: number;
+    /** Map a hit's repo path to a page slug in this viewer; `undefined` links the hit to its `url` instead. */
+    resolveSlug?: (id: string) => string | undefined;
+}
+
+const str = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
+
+/**
+ * A `DocsConfig.search` backed by a docs search endpoint, such as the one `apps/otta-docs-mcp` serves at
+ * `/api/search`. The response is untrusted: hits without a string `id` and `title` are dropped, and the UI
+ * renders the text as text and sanitises the link. A failed request throws, which the sidebar shows quietly.
+ */
+export function createRemoteDocsSearch(endpoint: string, options: RemoteDocsSearchOptions = {}): DocsSearch {
+    const { limit = 8, resolveSlug } = options;
+    return async (query, signal) => {
+        const params = new URLSearchParams({ q: query, limit: String(limit) });
+        const response = await fetch(`${endpoint}${endpoint.includes('?') ? '&' : '?'}${params}`, { signal });
+        if (!response.ok) throw new Error(`Docs search failed (${response.status})`);
+        const body = (await response.json()) as { hits?: unknown };
+        const hits = Array.isArray(body?.hits)
+            ? (body.hits as Partial<Record<keyof RemoteDocsSearchHit, unknown>>[])
+            : [];
+        return hits.flatMap((hit): DocsSearchHit[] => {
+            const id = str(hit?.id);
+            const title = str(hit?.title);
+            if (!id || !title) return [];
+            const slug = resolveSlug?.(id);
+            return [
+                {
+                    title,
+                    heading: str(hit.heading),
+                    excerpt: str(hit.excerpt),
+                    ...(slug ? { slug } : { href: str(hit.url) }),
+                },
+            ];
+        });
+    };
 }

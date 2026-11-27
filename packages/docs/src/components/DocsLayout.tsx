@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DocsConfig, DocsTheme } from '../types';
+import type { DocPage, DocsConfig, DocsTheme } from '../types';
 import { buildPageSlug, findPageBySlug } from '../utils';
 import { DocsSidebar } from './DocsSidebar';
 import { MarkdownRenderer, TableOfContents } from './MarkdownRenderer';
@@ -38,7 +38,11 @@ export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: D
     const [searchQuery, setSearchQuery] = useState('');
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const [resolvedContent, setResolvedContent] = useState<string>('');
+    // The page resolvedContent belongs to: while a lazy page loads, the previous page is still on screen.
+    const [resolvedPage, setResolvedPage] = useState<DocPage | undefined>(undefined);
     const [isLoadingContent, setIsLoadingContent] = useState(false);
+    // A full-text hit's heading, scrolled to once its page is rendered.
+    const [pendingHeading, setPendingHeading] = useState<{ slug: string; id: string } | null>(null);
 
     const [themeOverride, setThemeOverride] = useState<DocsTheme | null>(null);
     const effectiveTheme: DocsTheme = themeOverride ?? config.theme ?? 'standard';
@@ -71,26 +75,39 @@ export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: D
     useEffect(() => {
         if (!activePage) {
             setResolvedContent('');
+            setResolvedPage(undefined);
             return;
         }
 
         if (typeof activePage.content === 'string') {
             setResolvedContent(activePage.content);
+            setResolvedPage(activePage);
         } else if (typeof activePage.content === 'function') {
             setIsLoadingContent(true);
             activePage
                 .content()
                 .then((mod) => {
                     setResolvedContent(typeof mod === 'string' ? mod : mod.default);
+                    setResolvedPage(activePage);
                     setIsLoadingContent(false);
                 })
                 .catch((err) => {
                     console.error('Failed to load markdown', err);
                     setResolvedContent('# Error loading content. Please try again later.');
+                    setResolvedPage(activePage);
                     setIsLoadingContent(false);
                 });
         }
     }, [activePage]);
+
+    // Scroll to a hit's heading only once its own page is on screen: an earlier page may share the heading id.
+    // Runs after the scroll-to-top above, which fires when the page changes. Repeated headings land on the first.
+    useEffect(() => {
+        if (!pendingHeading || !resolvedPage) return;
+        if (findPageBySlug(config.sources, pendingHeading.slug) !== resolvedPage) return;
+        document.getElementById(pendingHeading.id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        setPendingHeading(null);
+    }, [pendingHeading, resolvedPage, config.sources]);
 
     const { prevPage, nextPage } = useMemo(() => {
         const allPages = config.sources.flatMap((source) =>
@@ -107,8 +124,9 @@ export function DocsLayout({ config, activeSlug, onNavigate, className = '' }: D
     }, [config.sources, activeSlug]);
 
     const handleNavigate = useCallback(
-        (slug: string) => {
+        (slug: string, headingId?: string) => {
             closeMobileNav();
+            setPendingHeading(headingId ? { slug, id: headingId } : null);
             onNavigate?.(slug);
         },
         [closeMobileNav, onNavigate],

@@ -171,6 +171,10 @@ BOOTSTRAP_OWNER_SECRET=supersecret-token
 CLOUDFLARE_ACCOUNT_ID=            # 32-char account ID (wrangler vars)
 CLOUDFLARE_ANALYTICS_API_TOKEN=  # Secret: Account Analytics Read; set via: pnpm wrangler secret put CLOUDFLARE_ANALYTICS_API_TOKEN
 # Bindings: OBCF_ANALYTICS_SHORTLINKS (shortlink_clicks), OBCF_ANALYTICS_REFERRALS (referral_clicks)
+
+# Docs full-text search in the /docs sidebar ("Found in the text"). Read by Vite at BUILD time: put it in
+# .env.local or the build environment, not wrangler vars. Unset: title filter only, no request leaves the app.
+VITE_DOCS_SEARCH_URL=https://mcp.ottabase.com/api/search
 ```
 
 ### OttaAI playground
