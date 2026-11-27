@@ -39,6 +39,13 @@ export const PRO_PACKAGES: ProPackage[] = [
         tryIt: [{ label: 'Open a support request', path: '/support' }],
     },
     {
+        key: 'knowledge',
+        name: 'Knowledge',
+        summary:
+            'A help center at /help: customers search the articles by meaning and ask in their own words, answered from the articles with the ones it used named.',
+        tryIt: [{ label: 'Ask the help center', path: '/help' }],
+    },
+    {
         key: 'privacy',
         name: 'Privacy',
         summary:
